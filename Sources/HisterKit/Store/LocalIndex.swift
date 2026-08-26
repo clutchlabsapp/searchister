@@ -104,6 +104,25 @@ public struct LocalIndex: Sendable {
             }
         }
 
+        migrator.registerMigration("v2-outbox") { db in
+            try db.create(table: "outbox") { t in
+                t.primaryKey("id", .text)
+                t.column("kind", .text).notNull()
+                // Pre-rendered JSON request body on disk. Uploads always stream from a file so
+                // the share extension never holds a large PDF in memory.
+                t.column("body_path", .text).notNull()
+                // Original attachment copy, removed once the upload succeeds.
+                t.column("attachment_path", .text)
+                t.column("url", .text).notNull()
+                t.column("title", .text)
+                t.column("state", .text).notNull().indexed()
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+                t.column("last_error", .text)
+                t.column("next_attempt_at", .integer).notNull().defaults(to: 0)
+                t.column("created_at", .integer).notNull()
+            }
+        }
+
         return migrator
     }
 

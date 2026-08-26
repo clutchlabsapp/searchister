@@ -12,7 +12,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
-        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.19"),
+        // Pinned to 0.9.x: DocxTextExtractor uses the failable `Archive(url:accessMode:)`
+        // initialiser, which 1.0 replaced with a throwing one.
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMinor(from: "0.9.19")),
     ],
     targets: [
         .target(
