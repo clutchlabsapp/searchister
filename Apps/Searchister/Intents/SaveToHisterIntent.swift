@@ -8,14 +8,14 @@ import HisterKit
 /// path means an automation that fires while offline queues exactly like a share does, instead of
 /// failing.
 struct SaveToHisterIntent: AppIntent {
-    static var title: LocalizedStringResource = "Save to Hister"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Save to Hister"
+    static let description = IntentDescription(
         "Adds a link or a file to your personal Hister index.",
         categoryName: "Index",
         searchKeywords: ["hister", "save", "index", "add", "bookmark", "archive"]
     )
 
-    static var openAppWhenRun: Bool = false
+    static let openAppWhenRun: Bool = false
 
     @Parameter(title: "Link")
     var url: URL?

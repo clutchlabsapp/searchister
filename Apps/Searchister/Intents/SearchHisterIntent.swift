@@ -8,15 +8,15 @@ import HisterKit
 /// local-disk speed whether or not the instance is reachable. When the server does answer, its
 /// results win — they are ranked over full text rather than excerpts.
 struct SearchHisterIntent: AppIntent {
-    static var title: LocalizedStringResource = "Search Hister"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Search Hister"
+    nonisolated(unsafe) static let description = IntentDescription(
         "Searches your personal Hister index and returns matching documents.",
         categoryName: "Search",
         searchKeywords: ["hister", "search", "index", "documents", "bookmarks"]
     )
 
     /// Results are worth showing even when Siri was invoked hands-free.
-    static var openAppWhenRun: Bool = false
+    static let openAppWhenRun: Bool = false
 
     @Parameter(title: "Query", requestValueDialog: "What should I search for?")
     var query: String
