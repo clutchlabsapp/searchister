@@ -29,9 +29,16 @@ struct SettingsView: View {
 
                 SecureField("Access token", text: $token, prompt: Text("app.access_token"))
 
-                Text("The token is the `app.access_token` value from your Hister config. It is stored in the Keychain and sent as the X-Access-Token header.")
+                Text("The token is the `app.access_token` value from your Hister config, sent as the X-Access-Token header.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Label(
+                    "Saved to your iCloud Keychain, so your other devices pick up the same server and token automatically.",
+                    systemImage: "icloud"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
                 HStack {
                     Button("Save") { Task { await save() } }
@@ -115,6 +122,8 @@ struct SettingsView: View {
     /// than leaving a configured app sitting on an empty index until the user finds a button.
     /// Saving credentials is the app's "first connection", so it starts the sync itself rather
     /// than leaving a configured app sitting on an empty index until the user finds a button.
+    /// Saving credentials is the app's "first connection", so it starts the sync itself rather
+    /// than leaving a configured app sitting on an empty index until the user finds a button.
     private func save() async {
         let url: URL
         do {
@@ -124,15 +133,20 @@ struct SettingsView: View {
             return
         }
 
-        let switchedServer = AppServices.shared.updateCredentials(
-            HisterCredentials(baseURL: url, accessToken: token)
-        )
+        let change: AppServices.CredentialsChange
+        do {
+            change = try AppServices.shared.updateCredentials(
+                HisterCredentials(baseURL: url, accessToken: token)
+            )
+        } catch {
+            testResult = .failure(error.localizedDescription)
+            return
+        }
         serverURL = url.absoluteString
 
-        let needsFullIndex = switchedServer || !AppServices.shared.hasSeededCache
-        testResult = .success(needsFullIndex ? "Saved. Building the offline index…" : "Saved.")
+        testResult = .success(change == .sameServer ? "Saved." : "Saved. Building the offline index…")
 
-        if switchedServer {
+        if change == .serverChanged {
             // A different instance's documents are not this one's. Keeping them would leave the
             // app answering offline searches, and Spotlight, out of the old server's index.
             await model.resync()

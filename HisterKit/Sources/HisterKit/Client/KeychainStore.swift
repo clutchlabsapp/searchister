@@ -2,6 +2,11 @@ import Foundation
 import Security
 
 /// Thin wrapper over the Keychain for a single generic-password service.
+///
+/// Every query sets `kSecUseDataProtectionKeychain`. On iOS that is the only keychain there is,
+/// but on macOS the default is still the old file-based keychain, which supports neither access
+/// groups nor iCloud sync — so without it the same code silently behaves differently on the two
+/// platforms.
 public struct KeychainStore: Sendable {
     public enum KeychainError: Error, Equatable {
         case unexpectedStatus(OSStatus)
@@ -11,10 +16,13 @@ public struct KeychainStore: Sendable {
 
     private let service: String
     private let accessGroup: String?
+    /// Whether items are synced to the user's other devices through iCloud Keychain.
+    private let synchronizable: Bool
 
-    public init(service: String, accessGroup: String? = nil) {
+    public init(service: String, accessGroup: String? = nil, synchronizable: Bool = false) {
         self.service = service
         self.accessGroup = accessGroup
+        self.synchronizable = synchronizable
     }
 
     private func baseQuery(account: String) -> [String: Any] {
@@ -22,9 +30,13 @@ public struct KeychainStore: Sendable {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true,
         ]
         if let accessGroup {
             query[kSecAttrAccessGroup as String] = accessGroup
+        }
+        if synchronizable {
+            query[kSecAttrSynchronizable as String] = true
         }
         return query
     }
@@ -48,14 +60,20 @@ public struct KeychainStore: Sendable {
         let data = Data(value.utf8)
         let query = baseQuery(account: account)
 
-        // The token has to be readable by a background upload started while the device is
-        // locked, so use `AfterFirstUnlock` rather than `WhenUnlocked`.
-        let attributes: [String: Any] = [
+        // A background upload can start while the device is locked, so the item has to survive
+        // more than the first unlock of the session. `AfterFirstUnlock` is also the strongest
+        // protection class iCloud Keychain will sync — the `ThisDeviceOnly` variants never leave
+        // the device, which would defeat the point.
+        var attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
+        if synchronizable {
+            attributes[kSecAttrSynchronizable as String] = true
+        }
 
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let updateAttributes = attributes.filter { $0.key != kSecAttrSynchronizable as String }
+        let status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
         switch status {
         case errSecSuccess:
             return

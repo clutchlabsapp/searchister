@@ -31,7 +31,7 @@
 	<key>HisterAppGroupIdentifier</key>
 	<string>$(HISTER_APP_GROUP)</string>
 	<key>HisterKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)</string>
+	<string>$(HISTER_KEYCHAIN_GROUP)</string>
 
 	<!-- Must match AppDelegate.backgroundTaskIdentifier or BGTaskScheduler refuses to register. -->
 	<key>BGTaskSchedulerPermittedIdentifiers</key>

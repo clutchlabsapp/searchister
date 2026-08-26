@@ -33,6 +33,9 @@ public enum HisterError: Error, Equatable, Sendable {
     /// The App Group container could not be resolved — an entitlements problem.
     case sharedContainerUnavailable(String)
 
+    /// The credentials could not be written to the Keychain.
+    case credentialsNotSaved
+
     /// A file the ingest pipeline was told to read could not be opened.
     case unreadableAttachment(String)
 
@@ -64,6 +67,8 @@ extension HisterError: LocalizedError {
             return "Could not reach the server: \(detail)"
         case .sharedContainerUnavailable(let identifier):
             return "The shared app group “\(identifier)” is unavailable. Check the app's entitlements."
+        case .credentialsNotSaved:
+            return "The server details could not be saved to the Keychain. Check that the app's keychain sharing entitlement matches its team ID."
         case .unreadableAttachment(let detail):
             return "The shared file could not be read: \(detail)"
         case .noExtractableText(let detail):

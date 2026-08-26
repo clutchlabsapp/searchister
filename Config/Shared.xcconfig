@@ -1,11 +1,22 @@
 // Shared build settings for every target.
 //
-// HISTER_APP_GROUP and HISTER_KEYCHAIN_GROUP are expanded inside the .entitlements files and read
-// back at runtime through Info.plist (see HisterKit/Sources/HisterKit/Support/AppGroup.swift), so
-// this is the only place they need to change. Point them at identifiers you have registered in
-// your Apple Developer account.
+// These identifiers are expanded into the .entitlements files and into Info.plist, and read back
+// at runtime by HisterKit/Sources/HisterKit/Support/AppGroup.swift. This is the only place they
+// need to change — point them at identifiers registered in your Apple Developer account.
+
+// macOS requires an App Group identifier to begin with the team ID; iOS requires it to begin with
+// "group.". Getting this wrong on macOS does not fail loudly: the container simply does not
+// resolve, and anything that writes to it falls back to a path outside the sandbox and is denied
+// ("setting preferences outside an application's container requires ... sandbox access").
 HISTER_APP_GROUP = group.app.clutchlabs.searchister
-HISTER_KEYCHAIN_GROUP = app.clutchlabs.searchister
+HISTER_APP_GROUP[sdk=macosx*] = $(DEVELOPMENT_TEAM).group.app.clutchlabs.searchister
+
+// Keychain access groups are always team-prefixed on both platforms.
+//
+// Written out via DEVELOPMENT_TEAM rather than $(AppIdentifierPrefix): that variable is
+// substituted only while processing entitlements, so in Info.plist it survives verbatim and the
+// app reads a literal "$(AppIdentifierPrefix)…" back at runtime.
+HISTER_KEYCHAIN_GROUP = $(DEVELOPMENT_TEAM).app.clutchlabs.searchister
 
 // Set your team here, or create Config/Local.xcconfig (gitignored) containing:
 //   DEVELOPMENT_TEAM = YOURTEAMID

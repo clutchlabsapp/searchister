@@ -20,13 +20,25 @@ echo 'DEVELOPMENT_TEAM = YOURTEAMID' > Config/Local.xcconfig
 open Searchister.xcodeproj
 ```
 
-Register the App Group `group.app.clutchlabs.searchister` in your developer account, or change
-`HISTER_APP_GROUP` in `Config/Shared.xcconfig` to one you own. That one setting is expanded into
-the entitlements files and read back at runtime through Info.plist, so nothing in the Swift
-sources needs editing.
+Register the App Group in your developer account, or change `HISTER_APP_GROUP` in
+`Config/Shared.xcconfig` to one you own. It is expanded into the entitlements files and read back
+at runtime through Info.plist, so nothing in the Swift sources needs editing.
+
+Note the two identifiers are shaped differently per platform, which `Shared.xcconfig` handles:
+iOS wants `group.app.clutchlabs.searchister`, macOS wants it team-prefixed as
+`TEAMID.group.app.clutchlabs.searchister`. A macOS group without the prefix does not fail
+loudly — the container just never resolves, and the first write to it is refused by the sandbox.
 
 Then run the app, open **Settings**, enter your server URL and access token, and hit
 **Test connection**.
+
+The server URL and token are stored together as one item in your **iCloud Keychain**, so entering
+them on one device sets up the rest. With iCloud Keychain switched off the item stays local and
+everything still works on that device.
+
+The app itself asks for no file access — only network access and its shared container. The share
+extension additionally declares `files.user-selected.read-only`, which grants nothing until you
+hand it a specific file through the share sheet.
 
 `HisterKit` also builds and tests headlessly:
 

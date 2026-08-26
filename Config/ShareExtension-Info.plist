@@ -28,7 +28,7 @@
 	<key>HisterAppGroupIdentifier</key>
 	<string>$(HISTER_APP_GROUP)</string>
 	<key>HisterKeychainAccessGroup</key>
-	<string>$(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)</string>
+	<string>$(HISTER_KEYCHAIN_GROUP)</string>
 
 	<key>NSExtension</key>
 	<dict>

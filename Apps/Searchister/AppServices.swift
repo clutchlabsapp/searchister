@@ -97,13 +97,21 @@ public final class AppServices {
     /// The cached documents belong to whichever instance they came from, so switching servers
     /// has to discard them — otherwise the app would keep serving another instance's documents
     /// offline and in Spotlight.
-    /// - Returns: whether this replaced a *different* server. First-time setup returns false —
-    ///   there is nothing stale to discard, only an empty cache to fill.
-    @discardableResult
-    public func updateCredentials(_ new: HisterCredentials) -> Bool {
+    public enum CredentialsChange: Sendable, Equatable {
+        /// Nothing was configured before — an empty cache to fill, nothing stale to discard.
+        case firstConnection
+        /// A different server. Whatever is cached belongs to the old one.
+        case serverChanged
+        /// Same server, new token or a no-op.
+        case sameServer
+    }
+
+    public func updateCredentials(_ new: HisterCredentials) throws -> CredentialsChange {
         let previous = credentials.baseURL
-        credentials.store(new)
+        guard credentials.store(new) else { throw HisterError.credentialsNotSaved }
         invalidateClient()
-        return previous != nil && previous != new.baseURL
+
+        guard let previous else { return .firstConnection }
+        return previous == new.baseURL ? .sameServer : .serverChanged
     }
 }
