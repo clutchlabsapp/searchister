@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: completionHandler)
+            uploader.adoptBackgroundEvents(completionHandler: { @Sendable in completionHandler() })
             AppDelegate.retainedUploaders.append(uploader)
         }
     }
@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: completionHandler)
+            uploader.adoptBackgroundEvents(completionHandler: { @Sendable in completionHandler() })
             self.uploaders.append(uploader)
         }
     }
