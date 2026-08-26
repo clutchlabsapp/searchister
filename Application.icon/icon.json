@@ -1,0 +1,41 @@
+{
+  "fill" : {
+    "solid" : "display-p3:0.57227,0.36157,0.69385,1.00000"
+  },
+  "groups" : [
+    {
+      "blur-material" : null,
+      "hidden" : false,
+      "layers" : [
+        {
+          "glass" : false,
+          "image-name" : "Image 2.png",
+          "name" : "Image 2",
+          "position" : {
+            "scale" : 1.55,
+            "translation-in-points" : [
+              169.96968749999996,
+              249.46875
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : false,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
