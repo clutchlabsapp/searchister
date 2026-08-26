@@ -242,15 +242,49 @@ public struct LocalIndex: Sendable {
         }
     }
 
-    /// Documents whose `updated` timestamp is at or after `since`, oldest first. Used to hand
-    /// Spotlight only what changed since its last batch.
-    public func changed(since: Int64, limit: Int) throws -> [CachedDocument] {
+    /// Position in the `(updated, url)` ordering used to page through changed documents.
+    public struct ChangeCursor: Sendable, Equatable {
+        public var updated: Int64
+        public var url: String
+
+        public init(updated: Int64 = 0, url: String = "") {
+            self.updated = updated
+            self.url = url
+        }
+
+        /// Round-trips through `sync_state`, which stores strings.
+        public init?(rawValue: String) {
+            guard let separator = rawValue.firstIndex(of: "|"),
+                  let updated = Int64(rawValue[rawValue.startIndex..<separator])
+            else {
+                return nil
+            }
+            self.updated = updated
+            self.url = String(rawValue[rawValue.index(after: separator)...])
+        }
+
+        public var rawValue: String { "\(updated)|\(url)" }
+    }
+
+    /// Documents after `cursor` in `(updated, url)` order, oldest first.
+    ///
+    /// Keyset pagination rather than a plain `updated >= since`: with a timestamp alone, a cursor
+    /// resting on the newest document either re-reads it on the next pass (inclusive) or risks
+    /// skipping a sibling that shares its timestamp (exclusive). Including the URL makes the
+    /// position exact, so pages never repeat and never skip — which matters because Spotlight
+    /// re-indexing is otherwise silent work repeated on every sync.
+    public func changed(after cursor: ChangeCursor, limit: Int) throws -> [CachedDocument] {
         try dbPool.read { db in
-            try CachedDocument
-                .filter(Column("updated") >= since)
-                .order(Column("updated").asc)
-                .limit(limit)
-                .fetchAll(db)
+            try CachedDocument.fetchAll(
+                db,
+                sql: """
+                    SELECT * FROM documents
+                    WHERE updated > :updated OR (updated = :updated AND url > :url)
+                    ORDER BY updated ASC, url ASC
+                    LIMIT :limit
+                    """,
+                arguments: ["updated": cursor.updated, "url": cursor.url, "limit": limit]
+            )
         }
     }
 

@@ -95,8 +95,8 @@ struct LocalIndexTests {
         #expect(stored.fullText == "the complete body of the document")
     }
 
-    @Test("changed(since:) drives the Spotlight cursor")
-    func changedSince() throws {
+    @Test("changed(after:) pages by (updated, url) without repeating or skipping")
+    func changedAfter() throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
@@ -105,8 +105,46 @@ struct LocalIndexTests {
             CachedDocument(document: makeDocument(url: "https://example.com/new", updated: 500)),
         ])
 
-        let changed = try index.changed(since: 200, limit: 10)
-        #expect(changed.map(\.url) == ["https://example.com/new"])
+        let all = try index.changed(after: LocalIndex.ChangeCursor(), limit: 10)
+        #expect(all.map(\.url) == ["https://example.com/old", "https://example.com/new"])
+
+        // Resuming from the last row returns nothing — the position is exclusive, so a document
+        // is never handed to Spotlight twice.
+        let resumed = try index.changed(
+            after: LocalIndex.ChangeCursor(updated: 500, url: "https://example.com/new"),
+            limit: 10
+        )
+        #expect(resumed.isEmpty)
+    }
+
+    /// Documents sharing a timestamp are the case a timestamp-only cursor cannot page through:
+    /// exclusive skips siblings, inclusive repeats them forever.
+    @Test("documents sharing a timestamp page correctly")
+    func changedAfterSameTimestamp() throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert((0..<3).map {
+            CachedDocument(document: makeDocument(url: "https://example.com/\($0)", updated: 100))
+        })
+
+        var seen: [String] = []
+        var cursor = LocalIndex.ChangeCursor()
+        while true {
+            let page = try index.changed(after: cursor, limit: 1)
+            guard let row = page.first else { break }
+            seen.append(row.url)
+            cursor = LocalIndex.ChangeCursor(updated: row.updated ?? 0, url: row.url)
+        }
+
+        #expect(seen == ["https://example.com/0", "https://example.com/1", "https://example.com/2"])
+    }
+
+    @Test("the change cursor round-trips through sync_state")
+    func changeCursorRoundTrip() {
+        let cursor = LocalIndex.ChangeCursor(updated: 1_740_003_600, url: "https://example.com/a?x=1|2")
+        let restored = LocalIndex.ChangeCursor(rawValue: cursor.rawValue)
+        #expect(restored == cursor)
     }
 
     @Test("sync state survives a round trip")

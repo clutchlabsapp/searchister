@@ -12,8 +12,8 @@ public struct SpotlightIndexer: Sendable {
     /// Namespace so these items are removable without touching anything else the app indexes.
     public static let domainIdentifier = "app.clutchlabs.searchister.documents"
 
-    /// Documents per `CSSearchableIndex` batch. Large batches are faster but a failure costs more
-    /// work, and the client state is only advanced on a successful `endBatch`.
+    /// Documents handed to Spotlight per request. Sized so one failure costs little work and a
+    /// large index does not build one enormous array of items.
     public static let batchSize = 500
 
     private let index: LocalIndex
@@ -24,48 +24,55 @@ public struct SpotlightIndexer: Sendable {
         self.searchableIndex = searchableIndex
     }
 
-    /// Hands Spotlight everything indexed since the last successful batch.
+    /// Hands Spotlight everything indexed since the last successful pass.
     ///
-    /// Progress is tracked with `CSSearchableIndex`'s own client state rather than a local flag:
-    /// the system is the authority on which batch it actually committed, so on reinstall or after
-    /// a Spotlight database reset the app re-publishes instead of believing a stale local marker.
+    /// Deliberately does not use `beginBatch()` / `endBatch(withClientState:)`. Those are only
+    /// valid on an index created with `CSSearchableIndex(name:)`; calling them on the shared
+    /// index raises an Objective-C `NSException` ("Batching is not supported for
+    /// CSSearchableIndexShared"), which Swift cannot catch, so it terminates the app — on a code
+    /// path that runs during every sync.
+    ///
+    /// Progress is tracked in `sync_state` instead, as a `(updated, url)` position. That gives up
+    /// the system's own record of which batch it committed, but re-indexing an item is idempotent
+    /// — a `CSSearchableItem` with the same `uniqueIdentifier` replaces the previous one — so the
+    /// only thing the client state really protected against was *missing* items, and advancing
+    /// the cursor solely on a successful completion handler protects against that just as well.
     public func indexChangedDocuments() async throws {
-        var cursor = try await lastIndexedTimestamp()
+        var cursor = lastIndexedPosition()
 
         while true {
-            let documents = try index.changed(since: cursor, limit: Self.batchSize)
+            let documents = try index.changed(after: cursor, limit: Self.batchSize)
             guard !documents.isEmpty else { break }
 
             let items = documents.map(Self.searchableItem(for:))
-            let newCursor = documents.compactMap(\.updated).max() ?? cursor
 
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                searchableIndex.beginBatch()
                 searchableIndex.indexSearchableItems(items) { error in
                     if let error {
                         continuation.resume(throwing: error)
-                        return
-                    }
-                    let state = Data(String(newCursor).utf8)
-                    searchableIndex.endBatch(withClientState: state) { endError in
-                        if let endError {
-                            continuation.resume(throwing: endError)
-                        } else {
-                            continuation.resume()
-                        }
+                    } else {
+                        continuation.resume()
                     }
                 }
             }
 
-            // `changed(since:)` is inclusive, so a cursor that does not advance would loop
-            // forever on a page of documents sharing one timestamp.
-            guard newCursor > cursor else { break }
-            cursor = newCursor
+            // The page is ordered by (updated, url), so its last row is the new position.
+            guard let last = documents.last else { break }
+            cursor = LocalIndex.ChangeCursor(updated: last.updated ?? cursor.updated, url: last.url)
+
+            // Only advance once Spotlight has actually accepted the items, so an interrupted or
+            // failed pass resumes from the same place rather than skipping ahead.
+            try index.setSyncValue(cursor.rawValue, for: .spotlightClientState)
+
+            if documents.count < Self.batchSize { break }
         }
     }
 
-    /// Rebuilds the Spotlight index from scratch. Used for the system's "reindex all" request and
-    /// after a full resync.
+    /// Rebuilds the Spotlight index from scratch.
+    ///
+    /// This is also the recovery path if Spotlight's own index is ever reset out from under the
+    /// app — the local cursor cannot detect that on its own. Settings exposes it as
+    /// "Rebuild cache from scratch".
     public func reindexAll() async throws {
         try await deleteAll()
         try index.setSyncValue(nil, for: .spotlightClientState)
@@ -89,20 +96,13 @@ public struct SpotlightIndexer: Sendable {
         }
     }
 
-    private func lastIndexedTimestamp() async throws -> Int64 {
-        let state: Data? = try? await withCheckedThrowingContinuation { continuation in
-            searchableIndex.fetchLastClientState { data, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: data)
-                }
-            }
+    private func lastIndexedPosition() -> LocalIndex.ChangeCursor {
+        guard let raw = try? index.syncValue(.spotlightClientState),
+              let cursor = LocalIndex.ChangeCursor(rawValue: raw)
+        else {
+            return LocalIndex.ChangeCursor()
         }
-        guard let state, let text = String(data: state, encoding: .utf8), let value = Int64(text) else {
-            return 0
-        }
-        return value
+        return cursor
     }
 
     static func searchableItem(for document: CachedDocument) -> CSSearchableItem {
