@@ -1,0 +1,38 @@
+{
+  "total": 2,
+  "documents": [
+    {
+      "id": "0:https://example.com/a",
+      "url": "https://example.com/a",
+      "domain": "example.com",
+      "title": "Postgres index maintenance",
+      "text": "Autovacuum keeps bloat under control. REINDEX CONCURRENTLY rebuilds without a long lock.",
+      "favicon_key": "abc123",
+      "score": 4.5,
+      "added": 1740000000,
+      "updated": 1740003600,
+      "type": 0,
+      "language": "en",
+      "user_id": 0,
+      "label": "ops",
+      "add_count": 3,
+      "metadata": {"type": "html"}
+    },
+    {
+      "id": "0:remote-file://laptop/notes.md",
+      "url": "remote-file://laptop/notes.md",
+      "domain": "laptop",
+      "title": "notes.md",
+      "text": "Standup notes for the week.",
+      "added": 1739900000,
+      "updated": 1739900000,
+      "type": 2,
+      "user_id": 0
+    }
+  ],
+  "history": null,
+  "search_duration": "3.2ms",
+  "query_suggestion": "",
+  "page_key": "cursor-page-2",
+  "semantic_enabled": false
+}

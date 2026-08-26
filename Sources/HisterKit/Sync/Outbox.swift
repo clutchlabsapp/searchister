@@ -91,10 +91,9 @@ public struct Outbox: Sendable {
     func markUploading(_ ids: [String]) throws {
         guard !ids.isEmpty else { return }
         try index.dbPool.write { db in
-            try db.execute(
-                sql: "UPDATE outbox SET state = ? WHERE id IN (\(databaseQuestionMarks(count: ids.count)))",
-                arguments: StatementArguments([OutboxState.uploading.rawValue] + ids)
-            )
+            _ = try OutboxItem
+                .filter(ids.contains(Column("id")))
+                .updateAll(db, Column("state").set(to: OutboxState.uploading.rawValue))
         }
     }
 
@@ -175,9 +174,5 @@ public struct Outbox: Sendable {
         let base: Int64 = 60
         let scaled = base << min(attempts - 1, 6)
         return min(scaled, 3600)
-    }
-
-    private func databaseQuestionMarks(count: Int) -> String {
-        Array(repeating: "?", count: count).joined(separator: ", ")
     }
 }

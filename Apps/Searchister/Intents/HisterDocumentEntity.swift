@@ -36,8 +36,7 @@ struct HisterDocumentEntity: AppEntity, IndexedEntity {
     var displayRepresentation: DisplayRepresentation {
         DisplayRepresentation(
             title: "\(title)",
-            subtitle: domain.map { "\($0)" } ?? "",
-            // Siri reads this out; the excerpt is the only genuinely useful thing to hear.
+            subtitle: domain.map { LocalizedStringResource(stringLiteral: $0) },
             image: .init(systemName: "doc.text.magnifyingglass")
         )
     }

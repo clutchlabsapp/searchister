@@ -1,0 +1,6 @@
+{
+  "documents": [
+    {"url": "https://example.com/a", "title": "A", "updated": 1740003600, "type": 0},
+    {"url": "https://example.com/b", "title": "B", "updated": 1740003500, "type": 0}
+  ]
+}

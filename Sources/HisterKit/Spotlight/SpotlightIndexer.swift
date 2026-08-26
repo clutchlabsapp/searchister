@@ -1,5 +1,6 @@
 import CoreSpotlight
 import Foundation
+import UniformTypeIdentifiers
 
 /// Publishes cached documents to Spotlight.
 ///

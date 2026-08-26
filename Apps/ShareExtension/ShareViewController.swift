@@ -20,6 +20,13 @@ typealias PlatformViewController = NSViewController
 final class ShareViewController: PlatformViewController {
     private var hosting: PlatformHostingController<ShareView>?
 
+    #if !canImport(UIKit)
+    /// `NSViewController` looks for a nib in `loadView()`, and the extension has none.
+    override func loadView() {
+        view = NSView(frame: CGRect(x: 0, y: 0, width: 420, height: 260))
+    }
+    #endif
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
