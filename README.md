@@ -11,30 +11,47 @@ A macOS and iOS client for a personal, self-hosted [Hister](https://hister.org) 
 
 - iOS 18 / macOS 15 or later
 - Xcode 16 or later
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 - A Hister instance reachable over HTTPS with `app.access_token` set in its config
 
 ## Getting started
 
 ```sh
-./Scripts/bootstrap.sh          # generates Searchister.xcodeproj
-echo 'DEVELOPMENT_TEAM = YOURTEAMID' > Scripts/Local.xcconfig
+echo 'DEVELOPMENT_TEAM = YOURTEAMID' > Config/Local.xcconfig
 open Searchister.xcodeproj
 ```
 
-Register the App Group `group.app.clutchlabs.searchister` in your developer account (or change
-`HISTER_APP_GROUP` in `Scripts/Shared.xcconfig` to one you own — it is read at runtime from
-Info.plist, so no source changes are needed).
+Register the App Group `group.app.clutchlabs.searchister` in your developer account, or change
+`HISTER_APP_GROUP` in `Config/Shared.xcconfig` to one you own. That one setting is expanded into
+the entitlements files and read back at runtime through Info.plist, so nothing in the Swift
+sources needs editing.
 
 Then run the app, open **Settings**, enter your server URL and access token, and hit
 **Test connection**.
 
-The package itself builds and tests without Xcode:
+`HisterKit` also builds and tests headlessly:
 
 ```sh
-swift build
-swift test
+swift test --package-path HisterKit
 ```
+
+## Project structure
+
+`Searchister.xcodeproj` is committed and is the source of truth — there is no generator step.
+
+`Apps/Searchister` and `Apps/ShareExtension` are **folder-backed groups**, so a Swift file dropped
+into either folder is picked up on the next build with no project edit.
+
+One multiplatform app target covers iOS and macOS (`SDKROOT = auto`); the source branches with
+`#if os(...)` where the platforms genuinely differ. Entitlements are split per platform because
+the sandbox keys belong on macOS only.
+
+`HisterKit/` is a local Swift package referenced by the project. GRDB and ZIPFoundation are
+declared in its manifest, so they resolve through the package rather than being listed in the
+project file.
+
+The app and extension targets ship in Swift 5 language mode with `SWIFT_STRICT_CONCURRENCY =
+complete`, so concurrency issues surface as warnings rather than blocking the build; the package
+itself is already Swift 6. Flip `SWIFT_VERSION` to `6.0` once the app layer is clean.
 
 ## How it talks to Hister
 
@@ -91,8 +108,10 @@ queued item rather than an empty document in your index.
 ## Layout
 
 ```
-Sources/HisterKit/     shared package: client, cache, sync, ingest, Spotlight
-Apps/Searchister/      SwiftUI app and App Intents
-Apps/ShareExtension/   share sheet target
-Tests/HisterKitTests/  swift test — no Xcode required
+Searchister.xcodeproj/         committed project — open this
+Config/                        xcconfig, Info.plists, entitlements
+HisterKit/Sources/HisterKit/   shared package: client, cache, sync, ingest, Spotlight
+HisterKit/Tests/               swift test --package-path HisterKit
+Apps/Searchister/              SwiftUI app and App Intents
+Apps/ShareExtension/           share sheet target
 ```
