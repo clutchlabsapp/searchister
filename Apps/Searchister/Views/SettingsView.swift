@@ -166,7 +166,13 @@ struct SettingsView: View {
         defer { isTesting = false }
         do {
             let url = try CredentialsStore.normalizeServerURL(serverURL)
-            let client = HisterClient(credentials: HisterCredentials(baseURL: url, accessToken: token))
+            // Same trimming Save applies, so the two cannot disagree about what is being tested.
+            let client = HisterClient(
+                credentials: HisterCredentials(
+                    baseURL: url,
+                    accessToken: token.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            )
 
             // /api/config is a NoAuth endpoint, so it proves the server is reachable but says
             // nothing about the token. /api/stats requires auth, so it is what actually tests it.

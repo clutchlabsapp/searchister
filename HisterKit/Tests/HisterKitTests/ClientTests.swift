@@ -182,7 +182,7 @@ struct ClientTests {
     @Test(
         "maps the server's status codes onto typed errors",
         arguments: [
-            (403, HisterError.unauthorized),
+            (403, HisterError.unauthorized(detail: "")),
             (406, HisterError.skippedByServerRules(url: "https://example.com/x")),
             (413, HisterError.payloadTooLarge),
             (422, HisterError.sensitiveContentRejected(url: "https://example.com/x")),
@@ -203,7 +203,7 @@ struct ClientTests {
     func retryClassification() {
         #expect(HisterError.transport("offline").isRetryable)
         #expect(HisterError.httpError(status: 503, body: "").isRetryable)
-        #expect(!HisterError.unauthorized.isRetryable)
+        #expect(!HisterError.unauthorized(detail: "").isRetryable)
         // Retrying a document the server's rules skip, or judged sensitive, will never succeed.
         #expect(!HisterError.skippedByServerRules(url: "x").isRetryable)
         #expect(!HisterError.sensitiveContentRejected(url: "x").isRetryable)

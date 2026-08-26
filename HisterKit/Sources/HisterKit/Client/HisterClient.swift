@@ -197,7 +197,7 @@ public struct HisterClient: HisterAPI {
         let body = String(data: data, encoding: .utf8) ?? ""
         switch http.statusCode {
         case 401, 403:
-            throw HisterError.unauthorized
+            throw HisterError.unauthorized(detail: body)
         case 406:
             throw HisterError.skippedByServerRules(url: context)
         case 413:

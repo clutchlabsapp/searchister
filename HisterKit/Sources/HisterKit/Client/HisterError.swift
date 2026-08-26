@@ -9,8 +9,10 @@ public enum HisterError: Error, Equatable, Sendable {
     /// The configured base URL could not be turned into a request URL.
     case invalidServerURL(String)
 
-    /// 403 — the access token was missing, wrong, or the endpoint needs a user account.
-    case unauthorized
+    /// 401/403 — the request was refused. Carries the server's response body, because Hister
+    /// answers 403 for a CSRF rejection as well as a bad token and only the CSRF case writes a
+    /// body; without it every 403 gets reported as a bad token.
+    case unauthorized(detail: String)
 
     /// 406 — the server's skip rules rejected this URL, or it points at the Hister host itself.
     case skippedByServerRules(url: String)
@@ -50,8 +52,12 @@ extension HisterError: LocalizedError {
             return "No Hister server configured. Add your server URL and access token in Settings."
         case .invalidServerURL(let value):
             return "“\(value)” is not a valid server URL."
-        case .unauthorized:
-            return "The server rejected the access token. Check the token in Settings."
+        case .unauthorized(let detail):
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return "The server rejected the access token. Check the token in Settings."
+            }
+            return "The server refused the request: \(trimmed)"
         case .skippedByServerRules(let url):
             return "The server's rules skip this URL, so it was not indexed: \(url)"
         case .sensitiveContentRejected(let url):

@@ -36,18 +36,37 @@ public struct CredentialsStore: Sendable {
         var accessToken: String
     }
 
-    private let keychain: KeychainStore
+    // Storage is injected as three operations rather than a concrete `KeychainStore` so the
+    // round-trip behaviour can be tested without a real Keychain, which unit tests cannot rely on.
+    private let readValue: @Sendable (String) throws -> String
+    private let writeValue: @Sendable (String, String) throws -> Void
+    private let deleteValue: @Sendable (String) throws -> Void
 
     public init(keychain: KeychainStore? = nil) {
-        self.keychain = keychain ?? KeychainStore(
+        let store = keychain ?? KeychainStore(
             service: CredentialsStore.keychainService,
             accessGroup: AppGroup.keychainAccessGroup,
             synchronizable: true
         )
+        self.init(
+            read: { try store.read(account: $0) },
+            write: { try store.write($0, account: $1) },
+            delete: { try store.delete(account: $0) }
+        )
+    }
+
+    init(
+        read: @escaping @Sendable (String) throws -> String,
+        write: @escaping @Sendable (String, String) throws -> Void,
+        delete: @escaping @Sendable (String) throws -> Void
+    ) {
+        readValue = read
+        writeValue = write
+        deleteValue = delete
     }
 
     private func load() -> Stored? {
-        guard let raw = try? keychain.read(account: Self.keychainAccount),
+        guard let raw = try? readValue(Self.keychainAccount),
               let stored = try? JSONDecoder().decode(Stored.self, from: Data(raw.utf8))
         else {
             return nil
@@ -74,11 +93,20 @@ public struct CredentialsStore: Sendable {
         return HisterCredentials(baseURL: url, accessToken: stored.accessToken)
     }
 
+    /// Saves the credentials and confirms they read back.
+    ///
+    /// The read-back is not paranoia: the failure this guards against is a write that reports
+    /// success while reads keep returning an older value, which surfaces as the server rejecting
+    /// a token the user just replaced — with nothing in the save path admitting anything went
+    /// wrong. Better to fail at the point of saving than to look configured and be rejected on
+    /// every request afterwards.
+    ///
+    /// - Returns: whether the credentials are now what a subsequent read returns.
     @discardableResult
-    public func store(_ credentials: HisterCredentials) -> Bool {
+    public func store(_ newCredentials: HisterCredentials) -> Bool {
         let stored = Stored(
-            baseURL: credentials.baseURL.absoluteString,
-            accessToken: credentials.accessToken
+            baseURL: newCredentials.baseURL.absoluteString,
+            accessToken: newCredentials.accessToken
         )
         guard let data = try? JSONEncoder().encode(stored),
               let json = String(data: data, encoding: .utf8)
@@ -86,15 +114,15 @@ public struct CredentialsStore: Sendable {
             return false
         }
         do {
-            try keychain.write(json, account: Self.keychainAccount)
-            return true
+            try writeValue(json, Self.keychainAccount)
         } catch {
             return false
         }
+        return credentials() == newCredentials
     }
 
     public func clear() {
-        try? keychain.delete(account: Self.keychainAccount)
+        try? deleteValue(Self.keychainAccount)
     }
 
     /// Normalises what a user is likely to paste into the server field: bare host, missing
