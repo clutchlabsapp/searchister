@@ -136,7 +136,7 @@ struct SettingsView: View {
         let change: AppServices.CredentialsChange
         do {
             change = try AppServices.shared.updateCredentials(
-                HisterCredentials(baseURL: url, accessToken: token)
+                HisterCredentials(baseURL: url, accessToken: token.trimmingCharacters(in: .whitespacesAndNewlines))
             )
         } catch {
             testResult = .failure(error.localizedDescription)

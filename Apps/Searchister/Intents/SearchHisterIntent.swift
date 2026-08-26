@@ -9,7 +9,7 @@ import HisterKit
 /// results win — they are ranked over full text rather than excerpts.
 struct SearchHisterIntent: AppIntent {
     static let title: LocalizedStringResource = "Search Hister"
-    nonisolated(unsafe) static let description = IntentDescription(
+    static let description = IntentDescription(
         "Searches your personal Hister index and returns matching documents.",
         categoryName: "Search",
         searchKeywords: ["hister", "search", "index", "documents", "bookmarks"]

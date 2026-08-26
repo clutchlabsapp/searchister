@@ -13,7 +13,7 @@ struct HisterDocumentEntity: AppEntity, IndexedEntity {
         TypeDisplayRepresentation(name: "Document", numericFormat: "\(placeholder: .int) documents")
     }
 
-    static var defaultQuery = HisterDocumentQuery()
+    static var defaultQuery: HisterDocumentQuery { HisterDocumentQuery() }
 
     /// The document URL is the server's own identity for a document, so it is the entity id too.
     var id: String
