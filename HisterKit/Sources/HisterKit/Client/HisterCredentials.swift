@@ -15,10 +15,10 @@ public struct HisterCredentials: Sendable, Equatable {
 /// Keychain, so the app, the share extension and the App Intents all read the same credentials.
 public struct CredentialsStore: Sendable {
     private static let baseURLKey = "hister.baseURL"
-    private static let keychainService = "app.clutchlabs.searchister.token"
+    public static let keychainService = "app.clutchlabs.searchister.token"
     private static let keychainAccount = "hister-access-token"
 
-    private let defaults: UserDefaults
+    nonisolated(unsafe) private let defaults: UserDefaults
     private let keychain: KeychainStore
 
     public init(

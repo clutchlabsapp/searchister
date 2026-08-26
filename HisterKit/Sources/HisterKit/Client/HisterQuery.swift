@@ -201,6 +201,11 @@ public struct HisterStats: Codable, Sendable, Equatable {
             ?? container.decodeIfPresent(UInt64.self, forKey: .docCount)
             ?? container.decodeIfPresent(UInt64.self, forKey: .total)
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(documentCount, forKey: .documentCount)
+    }
 }
 
 /// Response of `GET /api/config`. Used by "Test connection" to prove the token works and to
