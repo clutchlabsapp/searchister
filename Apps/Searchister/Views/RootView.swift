@@ -13,7 +13,7 @@ struct RootView: View {
         } detail: {
             DocumentDetailView(url: model.selectedURL)
         }
-        .task { await model.loadInitialState() }
+        .task { await model.startup() }
         #else
         NavigationStack {
             SearchListView()
@@ -38,7 +38,7 @@ struct RootView: View {
                 SettingsView()
             }
         }
-        .task { await model.loadInitialState() }
+        .task { await model.startup() }
         #endif
     }
 }

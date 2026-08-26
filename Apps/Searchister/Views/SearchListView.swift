@@ -8,11 +8,6 @@ struct SearchListView: View {
         @Bindable var model = model
 
         List(selection: Binding(get: { model.selectedURL }, set: { model.selectedURL = $0 })) {
-            if model.isOffline {
-                OfflineBanner(directives: model.unsupportedDirectives)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-            }
-
             if !model.failedUploads.isEmpty {
                 Section("Not uploaded") {
                     ForEach(model.failedUploads) { item in
@@ -47,28 +42,6 @@ struct SearchListView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { StatusBar() }
-    }
-}
-
-private struct OfflineBanner: View {
-    let directives: [String]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label("Offline results", systemImage: "wifi.slash")
-                .font(.caption.weight(.semibold))
-            Text("Searching the local cache: titles, addresses and the first part of each document. Full-text results need the server.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if !directives.isEmpty {
-                Text("Ignored here: \(directives.joined(separator: ", "))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

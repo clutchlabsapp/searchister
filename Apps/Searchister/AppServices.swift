@@ -76,11 +76,34 @@ public final class AppServices {
     /// the sync runs, so the sync brings back the server's own extracted text rather than leaving
     /// the optimistic local row in place. Spotlight goes last because it publishes from the cache.
     @discardableResult
-    public func refresh() async -> SyncReport? {
+    public func refresh() async throws -> SyncReport? {
         await ingest?.flush()
         guard let engine = syncEngine() else { return nil }
-        let report = try? await engine.sync()
+        let report = try await engine.sync()
+        // Spotlight failing is not a reason to report the sync as failed — the cache is updated
+        // either way, and the next pass re-publishes from the same cursor.
         try? await spotlight?.indexChangedDocuments()
         return report
+    }
+
+    /// Whether the cache has ever been fully populated. Drives the first-connection sync.
+    public var hasSeededCache: Bool {
+        guard let index else { return false }
+        return (try? index.syncValue(.seedComplete)) == "1"
+    }
+
+    /// Point the app at a different server.
+    ///
+    /// The cached documents belong to whichever instance they came from, so switching servers
+    /// has to discard them — otherwise the app would keep serving another instance's documents
+    /// offline and in Spotlight.
+    /// - Returns: whether this replaced a *different* server. First-time setup returns false —
+    ///   there is nothing stale to discard, only an empty cache to fill.
+    @discardableResult
+    public func updateCredentials(_ new: HisterCredentials) -> Bool {
+        let previous = credentials.baseURL
+        credentials.store(new)
+        invalidateClient()
+        return previous != nil && previous != new.baseURL
     }
 }

@@ -8,7 +8,6 @@ import Observation
 final class SearchModel {
     var query: String = ""
     var hits: [CachedSearchHit] = []
-    var source: SearchSource = .cache(unsupportedDirectives: [])
     var total: UInt64?
     var suggestion: String?
     var isSearching = false
@@ -21,22 +20,18 @@ final class SearchModel {
     var errorMessage: String?
 
     private var searchTask: Task<Void, Never>?
+    private var isSyncing = false
 
-    var isOffline: Bool {
-        if case .cache = source { return true }
-        return false
-    }
-
-    var unsupportedDirectives: [String] {
-        if case .cache(let directives) = source { return directives }
-        return []
-    }
-
-    func loadInitialState() async {
+    /// First thing the window does. Shows whatever is already cached, then — if the app is
+    /// configured — syncs, so a freshly installed or freshly configured app fills itself in
+    /// without the user having to find a button.
+    func startup() async {
         refreshCounts()
         if hits.isEmpty, query.isEmpty {
             showRecent()
         }
+        guard AppServices.shared.isConfigured else { return }
+        await sync()
     }
 
     /// Shows the most recent documents when there is nothing to search for, so the app never
@@ -45,7 +40,6 @@ final class SearchModel {
         guard let index = AppServices.shared.index else { return }
         let recent = (try? index.recent(limit: 50)) ?? []
         hits = recent.map { CachedSearchHit(document: $0, snippet: nil) }
-        source = .cache(unsupportedDirectives: [])
         total = nil
         suggestion = nil
     }
@@ -65,7 +59,6 @@ final class SearchModel {
             if let cached = try? AppServices.shared.search?.searchCache(text, limit: 50) {
                 guard !Task.isCancelled else { return }
                 hits = cached.hits
-                source = cached.source
             }
 
             try? await Task.sleep(for: .milliseconds(250))
@@ -83,7 +76,6 @@ final class SearchModel {
         let outcome = await search.search(text, limit: 50)
         guard !Task.isCancelled, text == query else { return }
         hits = outcome.hits
-        source = outcome.source
         total = outcome.total
         suggestion = outcome.suggestion
     }
@@ -104,29 +96,62 @@ final class SearchModel {
             errorMessage = "Add your Hister server URL and access token in Settings."
             return
         }
-        do {
-            _ = try await engine.sync()
-            try? await AppServices.shared.spotlight?.indexChangedDocuments()
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        // A window per screen on macOS, plus pull-to-refresh, plus the post-save trigger: all of
+        // them can land at once, and two concurrent seeds would fight over the same cursor.
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        await withPhaseUpdates(from: engine) {
+            do {
+                try await AppServices.shared.refresh()
+                self.errorMessage = nil
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
-        syncPhase = await engine.phase
+
         refreshCounts()
         if query.isEmpty { showRecent() }
     }
 
     func resync() async {
         guard let engine = AppServices.shared.syncEngine() else { return }
-        do {
-            _ = try await engine.resetAndReseed()
-            try? await AppServices.shared.spotlight?.reindexAll()
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        guard !isSyncing else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        await withPhaseUpdates(from: engine) {
+            do {
+                _ = try await engine.resetAndReseed()
+                try? await AppServices.shared.spotlight?.reindexAll()
+                self.errorMessage = nil
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
+
         refreshCounts()
         showRecent()
+    }
+
+    /// Runs `work` while mirroring the engine's phase into `syncPhase`.
+    ///
+    /// The engine only publishes its phase as a property, and a first sync against a large index
+    /// is a long seed — so without polling the status bar would sit on "idle" for the whole thing
+    /// and then jump straight to the finished count. Polling is what makes the progress visible.
+    private func withPhaseUpdates(from engine: SyncEngine, _ work: () async -> Void) async {
+        // Inherits this type's main-actor isolation, so it can write `syncPhase` directly; it
+        // gets to run whenever the sync suspends on the network, which is most of the time.
+        let poller = Task { [weak self] in
+            while !Task.isCancelled {
+                self?.syncPhase = await engine.phase
+                try? await Task.sleep(for: .milliseconds(400))
+            }
+        }
+        await work()
+        poller.cancel()
+        syncPhase = await engine.phase
     }
 
     func flushQueue() async {

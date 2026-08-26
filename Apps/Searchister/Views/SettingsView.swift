@@ -34,7 +34,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
 
                 HStack {
-                    Button("Save") { save() }
+                    Button("Save") { Task { await save() } }
                         .disabled(serverURL.isEmpty || token.isEmpty)
                     Button("Test connection") { Task { await test() } }
                         .disabled(serverURL.isEmpty || token.isEmpty || isTesting)
@@ -111,17 +111,39 @@ struct SettingsView: View {
         }
     }
 
-    private func save() {
+    /// Saving credentials is the app's "first connection", so it starts the sync itself rather
+    /// than leaving a configured app sitting on an empty index until the user finds a button.
+    /// Saving credentials is the app's "first connection", so it starts the sync itself rather
+    /// than leaving a configured app sitting on an empty index until the user finds a button.
+    private func save() async {
+        let url: URL
         do {
-            let url = try CredentialsStore.normalizeServerURL(serverURL)
-            AppServices.shared.credentials.store(
-                HisterCredentials(baseURL: url, accessToken: token)
-            )
-            AppServices.shared.invalidateClient()
-            serverURL = url.absoluteString
-            testResult = .success("Saved.")
+            url = try CredentialsStore.normalizeServerURL(serverURL)
         } catch {
             testResult = .failure(error.localizedDescription)
+            return
+        }
+
+        let switchedServer = AppServices.shared.updateCredentials(
+            HisterCredentials(baseURL: url, accessToken: token)
+        )
+        serverURL = url.absoluteString
+
+        let needsFullIndex = switchedServer || !AppServices.shared.hasSeededCache
+        testResult = .success(needsFullIndex ? "Saved. Building the offline index…" : "Saved.")
+
+        if switchedServer {
+            // A different instance's documents are not this one's. Keeping them would leave the
+            // app answering offline searches, and Spotlight, out of the old server's index.
+            await model.resync()
+        } else {
+            await model.sync()
+        }
+
+        if let error = model.errorMessage {
+            testResult = .failure(error)
+        } else {
+            testResult = .success("Saved. \(model.cachedCount) documents cached.")
         }
     }
 

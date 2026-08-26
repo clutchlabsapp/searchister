@@ -73,9 +73,13 @@ FTS5 index. That is what offline search and Spotlight match against. Full text i
 the server and cached per document as you open them.
 
 This is a deliberate trade: mirroring the full text of a large personal index would be gigabytes
-on a phone. It does mean **offline results are shallower than online ones**, and the app says so
-with a banner rather than pretending to parity. Likewise, a Spotlight hit is a title/URL/excerpt
-match ranked by Spotlight's own scoring, not by Hister's.
+on a phone. It does mean **offline results are shallower than online ones** — matches come from
+titles, addresses and the excerpt rather than the whole document. Likewise, a Spotlight hit is a
+title/URL/excerpt match ranked by Spotlight's own scoring, not by Hister's.
+
+The cache is built on first connection: entering a server URL and token in Settings starts the
+seed straight away, and the status bar reports its progress. Pointing the app at a *different*
+server discards the old cache first, since those documents belong to the other instance.
 
 ## How sharing works
 

@@ -17,9 +17,6 @@ struct SearchisterApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .task {
-                    await AppServices.shared.refresh()
-                }
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     // Tapping a Spotlight result opens the document in the app.
                     guard let url = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String
@@ -36,7 +33,7 @@ struct SearchisterApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Sync Now") {
-                    Task { await AppServices.shared.refresh() }
+                    Task { await model.sync() }
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }
@@ -98,7 +95,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             using: nil
         ) { task in
             Task { @MainActor in
-                let work = Task { await AppServices.shared.refresh() }
+                let work = Task { try? await AppServices.shared.refresh() }
                 task.expirationHandler = { work.cancel() }
                 _ = await work.value
                 task.setTaskCompleted(success: true)
@@ -125,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // macOS has no BGTaskScheduler; a plain timer is enough for a desktop app that is
         // usually running anyway.
         timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { _ in
-            Task { @MainActor in await AppServices.shared.refresh() }
+            Task { @MainActor in try? await AppServices.shared.refresh() }
         }
     }
 
