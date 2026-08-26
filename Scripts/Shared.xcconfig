@@ -1,0 +1,10 @@
+// Shared build settings for every target.
+//
+// HISTER_APP_GROUP and HISTER_KEYCHAIN_GROUP must match the identifiers you register in your
+// Apple Developer account. They are read at runtime through Info.plist (see AppGroup.swift), so
+// changing them here is enough — no source edits required.
+HISTER_APP_GROUP = group.app.clutchlabs.searchister
+HISTER_KEYCHAIN_GROUP = app.clutchlabs.searchister
+
+// Set your team here, or create Scripts/Local.xcconfig (gitignored) and override it there.
+#include? "Local.xcconfig"

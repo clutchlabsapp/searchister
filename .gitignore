@@ -1,0 +1,21 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+!*.xcodeproj/project.pbxproj
+xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Local secrets — never commit a Hister access token
+*.local.xcconfig
+Secrets.xcconfig
+Scripts/Local.xcconfig

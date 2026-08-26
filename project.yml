@@ -1,0 +1,124 @@
+name: Searchister
+
+options:
+  bundleIdPrefix: app.clutchlabs.searchister
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+# Set DEVELOPMENT_TEAM in Scripts/Local.xcconfig (gitignored) rather than committing it.
+configFiles:
+  Debug: Scripts/Shared.xcconfig
+  Release: Scripts/Shared.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  HisterKit:
+    path: .
+
+targets:
+  Searchister:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Apps/Searchister
+    dependencies:
+      - package: HisterKit
+        product: HisterKit
+      - target: ShareExtension
+        embed: true
+    info:
+      path: Apps/Searchister/Info.plist
+      properties:
+        CFBundleDisplayName: Searchister
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        HisterAppGroupIdentifier: $(HISTER_APP_GROUP)
+        HisterKeychainAccessGroup: $(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen: {}
+        NSHumanReadableCopyright: ""
+        BGTaskSchedulerPermittedIdentifiers:
+          - app.clutchlabs.searchister.sync
+        CoreSpotlightContinuation: true
+    entitlements:
+      path: Apps/Searchister/Searchister.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(HISTER_APP_GROUP)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.clutchlabs.searchister
+        INFOPLIST_KEY_CFBundleDisplayName: Searchister
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ENABLE_PREVIEWS: YES
+
+  ShareExtension:
+    type: app-extension
+    supportedDestinations: [iOS, macOS]
+    sources:
+      - path: Apps/ShareExtension
+    dependencies:
+      - package: HisterKit
+        product: HisterKit
+    info:
+      path: Apps/ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Save to Hister
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        HisterAppGroupIdentifier: $(HISTER_APP_GROUP)
+        HisterKeychainAccessGroup: $(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsFileWithMaxCount: 10
+            NSExtensionActivationUsesStrictMatching: 0
+    entitlements:
+      path: Apps/ShareExtension/ShareExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(HISTER_APP_GROUP)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HISTER_KEYCHAIN_GROUP)
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.clutchlabs.searchister.share
+        SKIP_INSTALL: YES
+
+schemes:
+  Searchister:
+    build:
+      targets:
+        Searchister: all
+        ShareExtension: all
+    run:
+      config: Debug
+    test:
+      config: Debug
