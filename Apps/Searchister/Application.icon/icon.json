@@ -18,6 +18,18 @@
               249.46875
             ]
           }
+        },
+        {
+          "glass" : false,
+          "image-name" : "Image.png",
+          "name" : "Image",
+          "position" : {
+            "scale" : 1.28,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
         }
       ],
       "lighting" : "individual",
