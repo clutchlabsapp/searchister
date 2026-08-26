@@ -142,23 +142,47 @@ private struct FailedUploadRow: View {
 
 private struct EmptyStateView: View {
     @Environment(SearchModel.self) private var model
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
+
+    private var isConfigured: Bool { AppServices.shared.isConfigured }
 
     var body: some View {
         ContentUnavailableView {
-            Label(model.query.isEmpty ? "Nothing cached yet" : "No matches", systemImage: "magnifyingglass")
+            Label(
+                isConfigured
+                    ? (model.query.isEmpty ? "Nothing cached yet" : "No matches")
+                    : "Connect to your Hister server",
+                systemImage: isConfigured ? "magnifyingglass" : "server.rack"
+            )
         } description: {
-            if !AppServices.shared.isConfigured {
-                Text("Add your Hister server URL and access token in Settings to get started.")
+            if !isConfigured {
+                Text("Add your server address and access token to start searching your index.")
             } else if model.query.isEmpty {
                 Text("Sync to copy a searchable version of your index onto this device.")
             } else {
                 Text("Nothing in the index matches that query.")
             }
         } actions: {
-            if AppServices.shared.isConfigured, model.query.isEmpty {
+            if !isConfigured {
+                // The primary action when nothing is set up: without it the only route to Settings
+                // is a toolbar icon, which is not where someone looks on first launch.
+                Button("Open Settings") { showSettings() }
+                    .buttonStyle(.borderedProminent)
+            } else if model.query.isEmpty {
                 Button("Sync Now") { Task { await model.sync() } }
+                    .buttonStyle(.borderedProminent)
             }
         }
+    }
+
+    private func showSettings() {
+        #if os(macOS)
+        openSettings()
+        #else
+        model.isShowingSettings = true
+        #endif
     }
 }
 

@@ -13,6 +13,8 @@ final class SearchModel {
     var isSearching = false
 
     var selectedURL: String?
+    /// Drives the Settings sheet on iOS; on macOS the Settings scene is opened directly.
+    var isShowingSettings = false
     var syncPhase: SyncPhase = .idle
     var cachedCount: Int = 0
     var pendingUploads: Int = 0

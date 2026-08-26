@@ -98,7 +98,7 @@ struct ClientTests {
         }
 
         let client = makeClient()
-        let page = try await client.history(cursor: "[\"1740003600\"]", since: 1_700_000_000)
+        let page = try await client.history(cursor: "[\"1740003600\"]", since: 1_700_000_000, until: 1_740_000_000)
 
         let request = try #require(StubURLProtocol.recordedRequests.first)
         let components = try #require(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
@@ -107,6 +107,9 @@ struct ClientTests {
         // `/api/history` parses date_from as a Unix timestamp, unlike `/search`, which wants
         // YYYY-MM-DD — sending the wrong one there silently returns an unfiltered feed.
         #expect(components.queryItems?.first(where: { $0.name == "date_from" })?.value == "1700000000")
+        // date_to is what the seed pages by, since the cursor cannot be trusted to reach
+        // everything across the server's per-language indexes.
+        #expect(components.queryItems?.first(where: { $0.name == "date_to" })?.value == "1740000000")
 
         #expect(page.documents.count == 2)
         #expect(page.pageKey == "[\"1740003500\",\"0:https://example.com/b\"]")
@@ -124,7 +127,7 @@ struct ClientTests {
             StubURLProtocol.Response(status: 200, body: Data("null".utf8))
         }
 
-        let page = try await makeClient().history(cursor: "cursor", since: nil)
+        let page = try await makeClient().history(cursor: "cursor", since: nil, until: nil)
         #expect(page.documents.isEmpty)
         #expect(page.pageKey == nil)
     }

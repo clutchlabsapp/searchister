@@ -110,28 +110,74 @@ public actor SyncEngine {
 
     // MARK: - Enumerate
 
-    /// First full population of the cache. Resumable: the page cursor is written after every page.
+    /// Walks the whole index, newest first, handing each page to `onPage`.
+    ///
+    /// Paging is driven by narrowing `date_to` rather than by the `page_key` cursor. The cursor
+    /// maps onto bleve's `SearchAfter`, and the server searches an alias over several indexes
+    /// (documents are routed per language), where `SearchAfter` is applied per child index and
+    /// merged — so pages silently skip documents and a walk ends up seeing roughly half of them.
+    /// A date bound is evaluated by each child index independently and cannot skip.
+    ///
+    /// The cursor is still used *within* a timestamp: every web document is stamped
+    /// `updated = now` on the way in, so a bulk import can leave far more than one page sharing a
+    /// single second, and the date bound alone cannot page past that.
+    ///
+    /// - Parameter onPage: receives each page; returns the number of documents it newly recorded,
+    ///   which is what detects a walk that has stopped making progress.
+    private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
+        var upperBound: Int64?
+        var cursor: String?
+        var stalledPages = 0
+
+        while true {
+            let page = try await client.history(cursor: cursor, since: nil, until: upperBound)
+            guard !page.documents.isEmpty else { break }
+
+            let added = try onPage(page.documents)
+            let timestamps = page.documents.compactMap(\.updated)
+            let oldest = timestamps.min()
+            let isFullPage = page.documents.count >= Self.pageSize
+
+            if let oldest, oldest != upperBound {
+                // Move the window down. The bound is inclusive, so the boundary documents come
+                // back once more — harmless, since recording them is an upsert.
+                upperBound = oldest
+                cursor = nil
+                stalledPages = 0
+                continue
+            }
+
+            // The window did not move: either the page is entirely one timestamp, or the server
+            // returned no timestamps at all. Fall back to the cursor to get past it.
+            if isFullPage, let next = page.pageKey, !next.isEmpty, next != cursor {
+                cursor = next
+                stalledPages = added > 0 ? 0 : stalledPages + 1
+                if stalledPages < Self.stallLimit { continue }
+            }
+            break
+        }
+    }
+
+    /// How many consecutive pages may record nothing new before a walk gives up. Guards against a
+    /// server that keeps returning the same page for a cursor it cannot advance.
+    static let stallLimit = 3
+
+    /// First full population of the cache.
     func seed() async throws -> SyncReport {
-        var cursor = try index.syncValue(.seedPageKey)
         var upserted = 0
         var highestUpdated = Int64(try index.syncValue(.lastSyncedUpdated) ?? "0") ?? 0
         let serverCount = try? await client.stats().documentCount
 
         phase = .seeding(fetched: 0, total: serverCount)
 
-        while true {
-            let page = try await client.history(cursor: cursor, since: nil)
-            guard !page.documents.isEmpty else { break }
+        try await walkAll { documents in
+            let before = try index.documentCount()
+            upserted += try store(documents, highestUpdated: &highestUpdated)
+            let added = try index.documentCount() - before
 
-            upserted += try store(page.documents, highestUpdated: &highestUpdated)
-            phase = .seeding(fetched: upserted, total: serverCount)
-
-            // Checkpoint before asking for the next page: killed here, the next launch resumes
-            // from this cursor instead of re-downloading everything.
+            phase = .seeding(fetched: try index.documentCount(), total: serverCount)
             try index.setSyncValue(String(highestUpdated), for: .lastSyncedUpdated)
-            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
-            cursor = next
-            try index.setSyncValue(next, for: .seedPageKey)
+            return added
         }
 
         try index.setSyncValue(nil, for: .seedPageKey)
@@ -155,7 +201,7 @@ public actor SyncEngine {
         phase = .updating(fetched: 0)
 
         while true {
-            let page = try await client.history(cursor: cursor, since: from)
+            let page = try await client.history(cursor: cursor, since: from, until: nil)
             guard !page.documents.isEmpty else { break }
 
             upserted += try store(page.documents, highestUpdated: &highestUpdated)
@@ -241,21 +287,26 @@ public actor SyncEngine {
     func reconcile() async throws -> SyncReport {
         phase = .reconciling
 
-        var cursor: String?
         var live = Set<String>()
-
-        while true {
-            let page = try await client.history(cursor: cursor, since: nil)
-            guard !page.documents.isEmpty else { break }
-            live.formUnion(page.documents.map(\.url))
-            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
-            cursor = next
+        try await walkAll { documents in
+            let before = live.count
+            live.formUnion(documents.map(\.url))
+            return live.count - before
         }
 
         // A sweep that saw nothing is far more likely to be a broken response than an index the
         // user emptied; deleting the whole cache on that basis would be unrecoverable offline.
         guard !live.isEmpty else {
             return SyncReport(reconciled: false)
+        }
+
+        // Refuse to delete on the strength of a walk that came up short. Deletions are inferred
+        // from absence, so an incomplete walk does not look like an error — it looks like the
+        // server dropped every document the walk failed to reach, and reconcile would dutifully
+        // delete them from the cache.
+        if let serverCount = try? await client.stats().documentCount,
+           UInt64(live.count) < serverCount {
+            return SyncReport(reconciled: false, serverDocumentCount: serverCount)
         }
 
         let deleted = try index.deleteMissing(from: live)

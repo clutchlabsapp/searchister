@@ -38,6 +38,11 @@
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 		<key>NSExtensionAttributes</key>
 		<dict>
+			<!-- Runs SharePreprocessor.js in the page and hands the extension its DOM. Without
+			     this a shared link reaches Hister as a bare URL, and Hister only extracts a title
+			     and text when it is given HTML — it never fetches the page itself. -->
+			<key>NSExtensionJavaScriptPreprocessingFile</key>
+			<string>SharePreprocessor</string>
 			<key>NSExtensionActivationRule</key>
 			<dict>
 				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>

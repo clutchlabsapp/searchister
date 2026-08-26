@@ -3,9 +3,10 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(SearchModel.self) private var model
-    @State private var showingSettings = false
 
     var body: some View {
+        @Bindable var model = model
+
         #if os(macOS)
         NavigationSplitView {
             SidebarView()
@@ -20,7 +21,7 @@ struct RootView: View {
                 .navigationTitle("Searchister")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { showingSettings = true } label: {
+                        Button { model.isShowingSettings = true } label: {
                             Image(systemName: "gearshape")
                         }
                         .accessibilityLabel("Settings")
@@ -33,7 +34,7 @@ struct RootView: View {
                     DocumentDetailView(url: url)
                 }
         }
-        .sheet(isPresented: $showingSettings) {
+        .sheet(isPresented: $model.isShowingSettings) {
             NavigationStack {
                 SettingsView()
             }

@@ -17,7 +17,7 @@ struct SyncEngineTests {
         defer { cleanup() }
 
         let api = FakeHisterAPI()
-        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1")])]
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/1")])]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.sync()
@@ -33,14 +33,16 @@ struct SyncEngineTests {
 
         let api = FakeHisterAPI()
         api.statsCount = 3
-        api.historyPages = [
+        api.historyWindows = [
             nil: page([
                 makeDocument(url: "https://example.com/1", title: "One", updated: 300),
                 makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
-            ], next: "cursor-2"),
-            "cursor-2": page([
+            ]),
+            200: page([
+                makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
                 makeDocument(url: "https://example.com/3", title: "Three", updated: 100),
             ]),
+            100: page([makeDocument(url: "https://example.com/3", title: "Three", updated: 100)]),
         ]
 
         let engine = SyncEngine(client: api, index: index)
@@ -49,30 +51,35 @@ struct SyncEngineTests {
         #expect(report.upserted == 3)
         #expect(try index.documentCount() == 3)
         #expect(try index.syncValue(.seedComplete) == "1")
-        // The cursor is cleared once the seed finishes, so the next run goes incremental.
         #expect(try index.syncValue(.seedPageKey) == nil)
         #expect(try index.syncValue(.lastSyncedUpdated) == "300")
+        // Paged by narrowing date_to rather than by following the cursor.
+        #expect(api.recordedHistoryUntil.prefix(3) == [nil, 200, 100])
     }
 
-    @Test("an interrupted seed resumes from its stored cursor")
-    func seedResumes() async throws {
+    /// A walk that comes up short must never be read as "the server deleted everything it did
+    /// not return". Reconcile infers deletions from absence, so an incomplete walk looks
+    /// identical to a mass deletion — and would empty most of the cache.
+    @Test("reconcile refuses to delete when the walk saw fewer documents than the server has")
+    func reconcileRefusesShortWalk() async throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
-        try index.setSyncValue("cursor-2", for: .seedPageKey)
+        try index.upsert((0..<10).map {
+            CachedDocument(document: makeDocument(url: "https://example.com/\($0)"))
+        })
 
         let api = FakeHisterAPI()
-        api.historyPages = [
-            nil: page([makeDocument(url: "https://example.com/1")], next: "cursor-2"),
-            "cursor-2": page([makeDocument(url: "https://example.com/2")]),
-        ]
+        // The walk only reaches one document, but the server reports ten.
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/0")])]
+        api.statsCount = 10
 
         let engine = SyncEngine(client: api, index: index)
-        _ = try await engine.sync()
+        let report = try await engine.reconcile()
 
-        #expect(api.recordedHistoryCursors.first == "cursor-2")
-        #expect(try index.document(url: "https://example.com/1") == nil)
-        #expect(try index.document(url: "https://example.com/2") != nil)
+        #expect(report.reconciled == false)
+        #expect(report.deleted == 0)
+        #expect(try index.documentCount() == 10)
     }
 
     /// The overlap covers clock skew between device and server; re-fetching a few documents is
@@ -105,7 +112,7 @@ struct SyncEngineTests {
         defer { cleanup() }
 
         let api = FakeHisterAPI()
-        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1", title: "One")])]
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/1", title: "One")])]
         api.storedDocuments = [
             "https://example.com/1": makeDocument(
                 url: "https://example.com/1",
@@ -135,7 +142,7 @@ struct SyncEngineTests {
         defer { cleanup() }
 
         let api = FakeHisterAPI()
-        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1")])]
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/1")])]
         api.storedDocuments = ["https://example.com/1": makeDocument(url: "https://example.com/1")]
 
         let engine = SyncEngine(client: api, index: index)
@@ -228,7 +235,8 @@ struct SyncEngineTests {
         ])
 
         let api = FakeHisterAPI()
-        api.historyPages = [nil: page([makeDocument(url: "https://example.com/kept")])]
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/kept")])]
+        api.statsCount = 1
 
         let engine = SyncEngine(client: api, index: index)
         let report = try await engine.reconcile()
@@ -281,7 +289,7 @@ struct SyncEngineTests {
         try index.setSyncValue("1", for: .seedComplete)
 
         let api = FakeHisterAPI()
-        api.historyPages = [nil: page([makeDocument(url: "https://example.com/fresh")])]
+        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/fresh")])]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.resetAndReseed()

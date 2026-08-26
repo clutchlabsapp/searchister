@@ -95,9 +95,16 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
 
     func preview(url: String, extractor: String?) async throws -> String { "" }
 
-    func history(cursor: String?, since: Int64?) async throws -> HisterHistoryPage {
+    /// Pages keyed by the `date_to` bound the walk asked for (`nil` = newest). This mirrors how
+    /// sync actually pages: by narrowing the upper date bound, not by the cursor.
+    var historyWindows: [Int64?: HisterHistoryPage] = [:]
+    var recordedHistoryUntil: [Int64?] = []
+
+    func history(cursor: String?, since: Int64?, until: Int64?) async throws -> HisterHistoryPage {
         recordedHistoryCursors.append(cursor)
         recordedHistorySince.append(since)
+        recordedHistoryUntil.append(until)
+        if let page = historyWindows[until], cursor == nil { return page }
         return historyPages[cursor] ?? HisterHistoryPage(documents: [])
     }
 
