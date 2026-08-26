@@ -1,0 +1,169 @@
+import Foundation
+import HisterKit
+import Observation
+
+/// View state for search, sync and the ingest queue.
+@MainActor
+@Observable
+final class SearchModel {
+    var query: String = ""
+    var hits: [CachedSearchHit] = []
+    var source: SearchSource = .cache(unsupportedDirectives: [])
+    var total: UInt64?
+    var suggestion: String?
+    var isSearching = false
+
+    var selectedURL: String?
+    var syncPhase: SyncPhase = .idle
+    var cachedCount: Int = 0
+    var pendingUploads: Int = 0
+    var failedUploads: [OutboxItem] = []
+    var errorMessage: String?
+
+    private var searchTask: Task<Void, Never>?
+
+    var isOffline: Bool {
+        if case .cache = source { return true }
+        return false
+    }
+
+    var unsupportedDirectives: [String] {
+        if case .cache(let directives) = source { return directives }
+        return []
+    }
+
+    func loadInitialState() async {
+        refreshCounts()
+        if hits.isEmpty, query.isEmpty {
+            showRecent()
+        }
+    }
+
+    /// Shows the most recent documents when there is nothing to search for, so the app never
+    /// opens on a blank screen.
+    func showRecent() {
+        guard let index = AppServices.shared.index else { return }
+        let recent = (try? index.recent(limit: 50)) ?? []
+        hits = recent.map { CachedSearchHit(document: $0, snippet: nil) }
+        source = .cache(unsupportedDirectives: [])
+        total = nil
+        suggestion = nil
+    }
+
+    /// Runs the query, debounced so typing does not fire a request per keystroke.
+    func queryChanged() {
+        searchTask?.cancel()
+        let text = query
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+            showRecent()
+            return
+        }
+
+        searchTask = Task {
+            // Show cache results immediately, then let the server's answer replace them. This is
+            // what makes typing feel instant on a self-hosted server over the open internet.
+            if let cached = try? AppServices.shared.search?.searchCache(text, limit: 50) {
+                guard !Task.isCancelled else { return }
+                hits = cached.hits
+                source = cached.source
+            }
+
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await runSearch()
+        }
+    }
+
+    func runSearch() async {
+        guard let search = AppServices.shared.search else { return }
+        let text = query
+        isSearching = true
+        defer { isSearching = false }
+
+        let outcome = await search.search(text, limit: 50)
+        guard !Task.isCancelled, text == query else { return }
+        hits = outcome.hits
+        source = outcome.source
+        total = outcome.total
+        suggestion = outcome.suggestion
+    }
+
+    func openDocument(url: String) {
+        selectedURL = url
+        if hits.first(where: { $0.id == url }) == nil,
+           let index = AppServices.shared.index,
+           let document = try? index.document(url: url) {
+            hits.insert(CachedSearchHit(document: document, snippet: nil), at: 0)
+        }
+    }
+
+    // MARK: - Sync and queue
+
+    func sync() async {
+        guard let engine = AppServices.shared.syncEngine() else {
+            errorMessage = "Add your Hister server URL and access token in Settings."
+            return
+        }
+        do {
+            _ = try await engine.sync()
+            try? await AppServices.shared.spotlight?.indexChangedDocuments()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        syncPhase = await engine.phase
+        refreshCounts()
+        if query.isEmpty { showRecent() }
+    }
+
+    func resync() async {
+        guard let engine = AppServices.shared.syncEngine() else { return }
+        do {
+            _ = try await engine.resetAndReseed()
+            try? await AppServices.shared.spotlight?.reindexAll()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        refreshCounts()
+        showRecent()
+    }
+
+    func flushQueue() async {
+        await AppServices.shared.ingest?.flush()
+        refreshCounts()
+    }
+
+    func retryUpload(_ item: OutboxItem) async {
+        try? await AppServices.shared.ingest?.retry(id: item.id)
+        refreshCounts()
+    }
+
+    func discardUpload(_ item: OutboxItem) {
+        try? AppServices.shared.ingest?.discard(id: item.id)
+        refreshCounts()
+    }
+
+    func addURL(_ raw: String) async {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespaces)), url.scheme != nil else {
+            errorMessage = "That does not look like a URL."
+            return
+        }
+        do {
+            _ = try await AppServices.shared.ingest?.accept(url: url)
+            refreshCounts()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshCounts() {
+        if let index = AppServices.shared.index {
+            cachedCount = (try? index.documentCount()) ?? 0
+        }
+        if let ingest = AppServices.shared.ingest {
+            pendingUploads = (try? ingest.pendingCount()) ?? 0
+            failedUploads = (try? ingest.failedItems()) ?? []
+        }
+    }
+}
