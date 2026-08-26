@@ -128,19 +128,60 @@ public struct LocalIndex: Sendable {
 
     // MARK: - Writes
 
-    /// Inserts or updates cached rows, preserving any full text already cached for a document
-    /// whose new copy did not include it.
+    /// Inserts or updates cached rows.
+    ///
+    /// Sync writes documents twice: once as metadata from `/api/history`, which carries no text,
+    /// and again with text from `/api/batch`. So a row arriving without text must not blank out
+    /// text that is already cached — unless the document actually changed, in which case the
+    /// cached text is stale and is dropped so the enrichment pass fetches it again.
     public func upsert(_ documents: [CachedDocument]) throws {
         guard !documents.isEmpty else { return }
         try dbPool.write { db in
             for document in documents {
                 var row = document
-                if row.fullText == nil,
-                   let existing = try CachedDocument.fetchOne(db, key: row.url) {
-                    row.fullText = existing.fullText
+                if let existing = try CachedDocument.fetchOne(db, key: row.url) {
+                    let unchanged = existing.updated == row.updated
+                    if row.excerpt == nil {
+                        row.excerpt = unchanged ? existing.excerpt : nil
+                    }
+                    if row.fullText == nil {
+                        row.fullText = unchanged ? existing.fullText : nil
+                    }
                 }
                 try row.save(db)
             }
+        }
+    }
+
+    /// URLs of cached documents whose text has never been fetched.
+    ///
+    /// A NULL excerpt means "not asked yet"; an empty string means "asked, and the server had no
+    /// text" — so a text-free document is not re-requested on every sync.
+    public func urlsMissingExcerpt(limit: Int) throws -> [String] {
+        guard limit > 0 else { return [] }
+        return try dbPool.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT url FROM documents WHERE excerpt IS NULL ORDER BY updated DESC LIMIT ?",
+                arguments: [limit]
+            )
+        }
+    }
+
+    public func countMissingExcerpt() throws -> Int {
+        try dbPool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM documents WHERE excerpt IS NULL") ?? 0
+        }
+    }
+
+    /// Marks documents as having no retrievable text, so enrichment stops asking for them.
+    public func markExcerptUnavailable(urls: [String]) throws {
+        guard !urls.isEmpty else { return }
+        try dbPool.write { db in
+            _ = try CachedDocument
+                .filter(urls.contains(Column("url")))
+                .filter(Column("excerpt") == nil)
+                .updateAll(db, Column("excerpt").set(to: ""))
         }
     }
 

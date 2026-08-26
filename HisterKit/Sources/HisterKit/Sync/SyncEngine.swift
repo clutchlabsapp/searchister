@@ -5,6 +5,7 @@ public enum SyncPhase: Sendable, Equatable {
     case idle
     case seeding(fetched: Int, total: UInt64?)
     case updating(fetched: Int)
+    case enriching(done: Int, remaining: Int)
     case reconciling
     case failed(String)
     case finished(Date)
@@ -13,12 +14,20 @@ public enum SyncPhase: Sendable, Equatable {
 /// Outcome of one sync pass.
 public struct SyncReport: Sendable, Equatable {
     public var upserted: Int
+    public var enriched: Int
     public var deleted: Int
     public var reconciled: Bool
     public var serverDocumentCount: UInt64?
 
-    public init(upserted: Int = 0, deleted: Int = 0, reconciled: Bool = false, serverDocumentCount: UInt64? = nil) {
+    public init(
+        upserted: Int = 0,
+        enriched: Int = 0,
+        deleted: Int = 0,
+        reconciled: Bool = false,
+        serverDocumentCount: UInt64? = nil
+    ) {
         self.upserted = upserted
+        self.enriched = enriched
         self.deleted = deleted
         self.reconciled = reconciled
         self.serverDocumentCount = serverDocumentCount
@@ -27,22 +36,38 @@ public struct SyncReport: Sendable, Equatable {
 
 /// Keeps `LocalIndex` in step with the server.
 ///
-/// Three passes, in order of cost:
+/// Sync is built on `/api/history`, not `/search`, because `/search` cannot enumerate an index:
+/// over HTTP it answers `400 {"error":"text query required for format=json"}` for an empty query,
+/// and its match-all path is reachable only through the WebSocket upgrade the same handler falls
+/// through to. `/api/history` walks every document newest-first behind an opaque cursor and needs
+/// no search term.
 ///
-/// - **Seed** — walk the whole index once via `match_all` + `sort:-date`, following `page_key`.
-///   Progress is checkpointed after every page so an interrupted first sync resumes.
-/// - **Incremental** — the same query bounded by `date_from`, run on foreground, pull-to-refresh
-///   and after an ingest.
-/// - **Reconcile** — neither `/search` nor `/api/history` reports deletions, so the cache would
-///   otherwise accumulate tombstones forever. A full URL sweep (without text, so it is cheap)
-///   runs when `/api/stats` disagrees with the local count, or weekly.
+/// The cost is that `/api/history` returns metadata only — url, title, added, updated,
+/// add_count, favicon_key — so text arrives in a second pass, `POST /api/batch` with `get`
+/// operations. Sync is therefore two-stage:
+///
+/// - **Enumerate** (seed or incremental) — cheap, one request per 100 documents, and enough on
+///   its own to make the app usable and Spotlight populated.
+/// - **Enrich** — fills in excerpts for rows that have none, in bounded batches, resumable
+///   across runs so a large index fills in over several syncs instead of one very long one.
+///
+/// **Reconcile** exists on top of both because neither endpoint reports deletions.
 public actor SyncEngine {
-    /// Page size for the seed and reconcile walks. Large enough that a 100k index is a few
-    /// hundred requests, small enough that one page decodes without a memory spike.
-    public static let pageSize = 200
+    /// `/api/history` hard-codes 100 results per page server-side; this mirrors it for progress
+    /// arithmetic rather than being a request parameter.
+    public static let pageSize = 100
+
+    /// Documents per enrichment request. Well under the server's cap of 100 because a batch `get`
+    /// returns each document's stored HTML alongside its text, so large batches mean very large
+    /// responses for data that is thrown away.
+    public static let enrichmentBatchSize = 25
+
+    /// Ceiling on documents enriched in one sync, so a first sync against a large index returns
+    /// in reasonable time and the rest fills in on later passes.
+    public static let enrichmentBudget = 2_000
 
     /// How far back an incremental pass reaches beyond the last synced timestamp. Absorbs clock
-    /// skew between device and server, and re-fetching a handful of documents is free.
+    /// skew between device and server; re-fetching a handful of documents is free.
     public static let incrementalOverlap: Int64 = 300
 
     /// Maximum age of a reconcile before one is forced regardless of the stats comparison.
@@ -68,12 +93,13 @@ public actor SyncEngine {
     @discardableResult
     public func sync() async throws -> SyncReport {
         do {
-            let report: SyncReport
+            var report: SyncReport
             if try index.syncValue(.seedComplete) == "1" {
                 report = try await incrementalSync()
             } else {
                 report = try await seed()
             }
+            report.enriched = try await enrich(budget: Self.enrichmentBudget)
             phase = .finished(now())
             return report
         } catch {
@@ -82,11 +108,11 @@ public actor SyncEngine {
         }
     }
 
-    // MARK: - Seed
+    // MARK: - Enumerate
 
-    /// First full population of the cache. Resumable: `seedPageKey` is written after every page.
+    /// First full population of the cache. Resumable: the page cursor is written after every page.
     func seed() async throws -> SyncReport {
-        var pageKey = try index.syncValue(.seedPageKey)
+        var cursor = try index.syncValue(.seedPageKey)
         var upserted = 0
         var highestUpdated = Int64(try index.syncValue(.lastSyncedUpdated) ?? "0") ?? 0
         let serverCount = try? await client.stats().documentCount
@@ -94,26 +120,17 @@ public actor SyncEngine {
         phase = .seeding(fetched: 0, total: serverCount)
 
         while true {
-            let query = HisterQuery.everything(
-                includeText: true,
-                limit: Self.pageSize,
-                pageKey: pageKey
-            )
-            let results = try await client.search(query)
-            guard !results.documents.isEmpty else { break }
+            let page = try await client.history(cursor: cursor, since: nil)
+            guard !page.documents.isEmpty else { break }
 
-            let rows = results.documents.map { CachedDocument(document: $0, now: now()) }
-            try index.upsert(rows)
-            upserted += rows.count
-            highestUpdated = max(highestUpdated, rows.compactMap(\.updated).max() ?? 0)
-
+            upserted += try store(page.documents, highestUpdated: &highestUpdated)
             phase = .seeding(fetched: upserted, total: serverCount)
 
-            // Checkpoint before requesting the next page: if the app is killed here the next
-            // launch resumes from this cursor rather than re-downloading everything.
+            // Checkpoint before asking for the next page: killed here, the next launch resumes
+            // from this cursor instead of re-downloading everything.
             try index.setSyncValue(String(highestUpdated), for: .lastSyncedUpdated)
-            guard let next = results.pageKey, !next.isEmpty, next != pageKey else { break }
-            pageKey = next
+            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
+            cursor = next
             try index.setSyncValue(next, for: .seedPageKey)
         }
 
@@ -127,36 +144,25 @@ public actor SyncEngine {
         return SyncReport(upserted: upserted, serverDocumentCount: serverCount)
     }
 
-    // MARK: - Incremental
-
     func incrementalSync() async throws -> SyncReport {
         let lastSynced = Int64(try index.syncValue(.lastSyncedUpdated) ?? "0") ?? 0
         let from = max(0, lastSynced - Self.incrementalOverlap)
 
-        var pageKey: String?
+        var cursor: String?
         var upserted = 0
         var highestUpdated = lastSynced
 
         phase = .updating(fetched: 0)
 
         while true {
-            var query = HisterQuery.everything(
-                includeText: true,
-                limit: Self.pageSize,
-                pageKey: pageKey
-            )
-            query.dateFrom = from
-            let results = try await client.search(query)
-            guard !results.documents.isEmpty else { break }
+            let page = try await client.history(cursor: cursor, since: from)
+            guard !page.documents.isEmpty else { break }
 
-            let rows = results.documents.map { CachedDocument(document: $0, now: now()) }
-            try index.upsert(rows)
-            upserted += rows.count
-            highestUpdated = max(highestUpdated, rows.compactMap(\.updated).max() ?? 0)
+            upserted += try store(page.documents, highestUpdated: &highestUpdated)
             phase = .updating(fetched: upserted)
 
-            guard let next = results.pageKey, !next.isEmpty, next != pageKey else { break }
-            pageKey = next
+            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
+            cursor = next
         }
 
         try index.setSyncValue(String(highestUpdated), for: .lastSyncedUpdated)
@@ -165,10 +171,56 @@ public actor SyncEngine {
         if try await shouldReconcile() {
             let outcome = try await reconcile()
             report.deleted = outcome.deleted
-            report.reconciled = true
+            report.reconciled = outcome.reconciled
             report.serverDocumentCount = outcome.serverDocumentCount
         }
         return report
+    }
+
+    /// Writes one page of metadata and tracks the newest timestamp seen.
+    private func store(_ documents: [HisterDocument], highestUpdated: inout Int64) throws -> Int {
+        let rows = documents.map { CachedDocument(document: $0, now: now()) }
+        try index.upsert(rows)
+        highestUpdated = max(highestUpdated, rows.compactMap(\.updated).max() ?? 0)
+        return rows.count
+    }
+
+    // MARK: - Enrich
+
+    /// Fills in excerpts for cached rows that have none, up to `budget` documents.
+    ///
+    /// - Returns: how many documents were enriched.
+    @discardableResult
+    func enrich(budget: Int) async throws -> Int {
+        var enriched = 0
+        var remaining = try index.countMissingExcerpt()
+
+        while enriched < budget {
+            let urls = try index.urlsMissingExcerpt(limit: min(Self.enrichmentBatchSize, budget - enriched))
+            guard !urls.isEmpty else { break }
+
+            phase = .enriching(done: enriched, remaining: remaining)
+
+            let documents = try await client.batchGet(urls: urls)
+            let rows = documents.map { document -> CachedDocument in
+                var row = CachedDocument(document: document, now: now())
+                // An empty excerpt means "asked, nothing to index" — distinct from NULL, which
+                // means "not asked yet". Without that distinction a document the server holds no
+                // text for would be re-requested on every sync forever.
+                row.excerpt = row.excerpt ?? ""
+                return row
+            }
+            try index.upsert(rows)
+
+            // URLs the batch did not answer for — deleted between enumeration and enrichment —
+            // get the same treatment, and reconcile removes them later.
+            let answered = Set(documents.map(\.url))
+            try index.markExcerptUnavailable(urls: urls.filter { !answered.contains($0) })
+
+            enriched += urls.count
+            remaining = max(0, remaining - urls.count)
+        }
+        return enriched
     }
 
     // MARK: - Reconcile
@@ -185,30 +237,23 @@ public actor SyncEngine {
         return UInt64(try index.documentCount()) != serverCount
     }
 
-    /// Walks every live URL without fetching text, then drops cached rows the server no longer
-    /// has.
+    /// Walks every live URL, then drops cached rows the server no longer has.
     func reconcile() async throws -> SyncReport {
         phase = .reconciling
 
-        var pageKey: String?
+        var cursor: String?
         var live = Set<String>()
 
         while true {
-            let query = HisterQuery.everything(
-                includeText: false,
-                limit: Self.pageSize,
-                pageKey: pageKey
-            )
-            let results = try await client.search(query)
-            guard !results.documents.isEmpty else { break }
-            live.formUnion(results.documents.map(\.url))
-            guard let next = results.pageKey, !next.isEmpty, next != pageKey else { break }
-            pageKey = next
+            let page = try await client.history(cursor: cursor, since: nil)
+            guard !page.documents.isEmpty else { break }
+            live.formUnion(page.documents.map(\.url))
+            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
+            cursor = next
         }
 
-        // A reconcile that saw nothing is far more likely to be a broken response than an index
-        // the user emptied; deleting the whole cache on that basis would be unrecoverable
-        // offline.
+        // A sweep that saw nothing is far more likely to be a broken response than an index the
+        // user emptied; deleting the whole cache on that basis would be unrecoverable offline.
         guard !live.isEmpty else {
             return SyncReport(reconciled: false)
         }
@@ -220,13 +265,17 @@ public actor SyncEngine {
         return SyncReport(deleted: deleted, reconciled: true, serverDocumentCount: UInt64(live.count))
     }
 
-    /// Forces a full re-seed — the "Resync now" action in Settings.
+    /// Forces a full re-seed — the "Rebuild cache from scratch" action in Settings.
     public func resetAndReseed() async throws -> SyncReport {
         try index.removeAll()
         try index.setSyncValue(nil, for: .seedComplete)
         try index.setSyncValue(nil, for: .seedPageKey)
         try index.setSyncValue(nil, for: .lastSyncedUpdated)
         try index.setSyncValue(nil, for: .spotlightClientState)
-        return try await seed()
+
+        var report = try await seed()
+        report.enriched = try await enrich(budget: Self.enrichmentBudget)
+        phase = .finished(now())
+        return report
     }
 }

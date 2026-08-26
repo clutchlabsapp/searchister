@@ -1,8 +1,11 @@
 import Foundation
 
 /// Mirrors `indexer.Query`. Sent as the JSON-encoded `query` parameter of `GET /search`, which
-/// exposes every knob the individual query-string parameters do plus `match_all` — the flag the
-/// sync engine needs to walk the whole index.
+/// exposes every knob the individual query-string parameters do.
+///
+/// It cannot be used to enumerate the index: `serveSearch` rejects an empty `text` with
+/// `400 {"error":"text query required for format=json"}` before `match_all` is consulted. Cache
+/// sync walks `/api/history` instead.
 public struct HisterQuery: Codable, Sendable, Equatable {
     public var text: String
     public var highlight: String?
@@ -21,7 +24,11 @@ public struct HisterQuery: Codable, Sendable, Equatable {
     public var facets: Bool?
     public var facetSizes: [String: Int]?
     public var facetsOnly: Bool?
-    /// Match every document, ignoring `text`. Used to seed and reconcile the local cache.
+    /// Match every document, ignoring `text`.
+    ///
+    /// Only honoured on the WebSocket search path: `serveSearch` rejects an empty `text` with
+    /// 400 before this is ever consulted over HTTP, so cache sync enumerates through
+    /// `/api/history` instead.
     public var matchAll: Bool?
 
     public init(
@@ -79,17 +86,6 @@ public struct HisterQuery: Codable, Sendable, Equatable {
         case matchAll = "match_all"
     }
 
-    /// A query that walks the entire index newest-first — the backbone of cache seeding and
-    /// reconciliation.
-    public static func everything(includeText: Bool, limit: Int, pageKey: String? = nil) -> HisterQuery {
-        HisterQuery(
-            limit: limit,
-            sort: "-date",
-            pageKey: pageKey,
-            includeText: includeText,
-            matchAll: true
-        )
-    }
 }
 
 /// Mirrors `indexer.Results`.
@@ -159,20 +155,68 @@ public struct HisterTermCount: Codable, Sendable, Equatable {
 }
 
 /// Response of `GET /api/history` in its default ("indexed documents") mode.
+///
+/// This is the only endpoint that walks the whole index without a search term, which makes it —
+/// not `/search` — the basis of cache sync. `/search` over HTTP rejects an empty query outright
+/// ("text query required for format=json"); its match-all path exists only behind the WebSocket
+/// upgrade the same handler falls through to.
+///
+/// The documents it returns are metadata only: `url`, `title`, `added`, `updated`, `add_count`
+/// and `favicon_key`. No text, domain, label or language — those come from a follow-up
+/// `POST /api/batch` with `get` operations.
 public struct HisterHistoryPage: Codable, Sendable, Equatable {
     public var documents: [HisterDocument]
+    /// Opaque cursor to pass back as the `last` parameter of the next request.
+    ///
+    /// Despite the parameter name (and the server's own API description calling it "the URL of
+    /// the last indexed document"), the server unmarshals `last` as the JSON sort-key array it
+    /// puts in `page_key` — a URL there is silently ignored and every page repeats the first.
+    public var pageKey: String?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         documents = try container.decodeIfPresent([HisterDocument].self, forKey: .documents) ?? []
+        pageKey = try container.decodeIfPresent(String.self, forKey: .pageKey)
     }
 
-    public init(documents: [HisterDocument]) {
+    public init(documents: [HisterDocument], pageKey: String? = nil) {
         self.documents = documents
+        self.pageKey = pageKey
     }
 
     enum CodingKeys: String, CodingKey {
         case documents
+        case pageKey = "page_key"
+    }
+}
+
+/// Response of `POST /api/batch`.
+public struct HisterBatchResponse: Codable, Sendable, Equatable {
+    public var results: [HisterBatchResult]
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        results = try container.decodeIfPresent([HisterBatchResult].self, forKey: .results) ?? []
+    }
+
+    public init(results: [HisterBatchResult]) {
+        self.results = results
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case results
+    }
+}
+
+public struct HisterBatchResult: Codable, Sendable, Equatable {
+    public var status: Int
+    public var error: String?
+    public var document: HisterDocument?
+
+    public init(status: Int, error: String? = nil, document: HisterDocument? = nil) {
+        self.status = status
+        self.error = error
+        self.document = document
     }
 }
 

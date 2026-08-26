@@ -58,27 +58,45 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
 /// An in-memory `HisterAPI` for exercising the sync engine without a server.
 final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
-    /// Pages returned by `search`, keyed by the incoming `page_key` (`nil` for the first page).
-    var pages: [String?: HisterResults] = [:]
+    /// History pages keyed by the incoming cursor (`nil` for the first page). Sync enumerates
+    /// through `/api/history`, so this is what drives the sync tests.
+    var historyPages: [String?: HisterHistoryPage] = [:]
+    /// Full documents returned by a batch `get`, keyed by URL. A URL absent here comes back as a
+    /// per-item 404, exactly as the server reports a document deleted mid-sync.
+    var storedDocuments: [String: HisterDocument] = [:]
+    var searchPages: [String?: HisterResults] = [:]
     var statsCount: UInt64?
+
     var recordedQueries: [HisterQuery] = []
+    var recordedHistoryCursors: [String?] = []
+    var recordedHistorySince: [Int64?] = []
+    var recordedBatchURLs: [[String]] = []
     var addedDocuments: [HisterDocument] = []
 
     func serverConfig() async throws -> HisterServerConfig { HisterServerConfig(version: "test") }
 
     func search(_ query: HisterQuery) async throws -> HisterResults {
         recordedQueries.append(query)
-        return pages[query.pageKey] ?? HisterResults(total: 0, documents: [])
+        return searchPages[query.pageKey] ?? HisterResults(total: 0, documents: [])
     }
 
     func suggest(_ prefix: String) async throws -> [String] { [] }
 
-    func document(url: String) async throws -> HisterDocument { HisterDocument(url: url) }
+    func document(url: String) async throws -> HisterDocument {
+        storedDocuments[url] ?? HisterDocument(url: url)
+    }
 
     func preview(url: String, extractor: String?) async throws -> String { "" }
 
     func history(cursor: String?, since: Int64?) async throws -> HisterHistoryPage {
-        HisterHistoryPage(documents: [])
+        recordedHistoryCursors.append(cursor)
+        recordedHistorySince.append(since)
+        return historyPages[cursor] ?? HisterHistoryPage(documents: [])
+    }
+
+    func batchGet(urls: [String]) async throws -> [HisterDocument] {
+        recordedBatchURLs.append(urls)
+        return urls.compactMap { storedDocuments[$0] }
     }
 
     func stats() async throws -> HisterStats { HisterStats(documentCount: statsCount) }

@@ -12,6 +12,7 @@ public protocol HisterAPI: Sendable {
     func document(url: String) async throws -> HisterDocument
     func preview(url: String, extractor: String?) async throws -> String
     func history(cursor: String?, since: Int64?) async throws -> HisterHistoryPage
+    func batchGet(urls: [String]) async throws -> [HisterDocument]
     func stats() async throws -> HisterStats
     func add(_ document: HisterDocument) async throws
     func addPDF(_ document: HisterDocument, pdfData: Data) async throws
@@ -44,7 +45,9 @@ public struct HisterClient: HisterAPI {
 
     public func search(_ query: HisterQuery) async throws -> HisterResults {
         // The `query` parameter takes the full JSON `Query` object, which is the only way to set
-        // `match_all` and `include_text` — the individual query-string params do not cover them.
+        // `include_text` and the facet options; the individual query-string params do not cover
+        // them. `text` must be non-empty: the handler answers 400 for an empty query rather than
+        // matching everything.
         let encoded = try JSONEncoder().encode(query)
         guard let json = String(data: encoded, encoding: .utf8) else {
             throw HisterError.decodingFailed("query could not be encoded")
@@ -78,12 +81,54 @@ public struct HisterClient: HisterAPI {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
+    /// One page of indexed documents, newest first.
+    ///
+    /// `cursor` is the previous page's `pageKey`. `since` is a Unix timestamp bound on `updated`
+    /// — note this endpoint parses it as an integer, unlike `/search`, which expects `YYYY-MM-DD`.
     public func history(cursor: String? = nil, since: Int64? = nil) async throws -> HisterHistoryPage {
         var items: [URLQueryItem] = []
         if let cursor { items.append(URLQueryItem(name: "last", value: cursor)) }
         if let since { items.append(URLQueryItem(name: "date_from", value: String(since))) }
-        return try await decode(builder.get("/api/history", query: items))
+
+        let data = try await perform(builder.get("/api/history", query: items))
+        // The handler returns a bare `null` — not an empty object — once the pages run out.
+        let trimmed = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "null" || trimmed?.isEmpty == true {
+            return HisterHistoryPage(documents: [])
+        }
+        do {
+            return try JSONDecoder().decode(HisterHistoryPage.self, from: data)
+        } catch {
+            throw HisterError.decodingFailed(String(describing: error))
+        }
     }
+
+    /// Fetches complete documents — text included — for up to 100 URLs in one request.
+    ///
+    /// `/api/history` carries metadata only, so this is what fills in the text the local excerpts
+    /// are built from. URLs the server no longer holds come back as per-item 404s and are simply
+    /// dropped rather than failing the batch.
+    public func batchGet(urls: [String]) async throws -> [HisterDocument] {
+        guard !urls.isEmpty else { return [] }
+        struct Operation: Encodable {
+            let op = "get"
+            let url: String
+        }
+        struct Payload: Encodable {
+            let ops: [Operation]
+        }
+        let body = try JSONEncoder().encode(Payload(ops: urls.prefix(Self.maximumBatchSize).map(Operation.init)))
+        let data = try await perform(builder.postJSON("/api/batch", body: body))
+        do {
+            let response = try JSONDecoder().decode(HisterBatchResponse.self, from: data)
+            return response.results.compactMap { $0.status == 200 ? $0.document : nil }
+        } catch {
+            throw HisterError.decodingFailed(String(describing: error))
+        }
+    }
+
+    /// The server rejects a batch of more than 100 operations outright.
+    public static let maximumBatchSize = 100
 
     public func stats() async throws -> HisterStats {
         try await decode(builder.get("/api/stats"))

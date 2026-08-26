@@ -59,6 +59,12 @@ public struct SearchService: Sendable {
     /// Successful server results are written into the cache on the way past, so browsing keeps
     /// the offline index warm between syncs.
     public func search(_ text: String, limit: Int = 50) async -> SearchOutcome {
+        // `/search` answers 400 for an empty query, so it is served locally — which is also what
+        // the caller wants: an empty query means "show me what's there".
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (try? searchCache(text, limit: limit))
+                ?? SearchOutcome(hits: [], source: .cache(unsupportedDirectives: []))
+        }
         do {
             let client = try clientProvider()
             var query = HisterQuery(text: text, limit: limit)

@@ -63,8 +63,26 @@ Every request carries two headers, and both are load-bearing:
 | `X-Access-Token` | Authenticates against `app.access_token`. |
 
 Endpoints used: `/api/config`, `/search`, `/suggest`, `/api/document`, `/api/preview`,
-`/api/history`, `/api/stats`, `/api/add`, `/api/add_pdf`, `/api/label`, `/api/delete`,
-`/api/favicon`.
+`/api/history`, `/api/batch`, `/api/stats`, `/api/add`, `/api/add_pdf`, `/api/label`,
+`/api/delete`, `/api/favicon`.
+
+### How sync enumerates the index
+
+`/search` cannot do it. Over HTTP it answers `400 {"error":"text query required for format=json"}`
+for an empty query, and its match-all path is reachable only through the WebSocket upgrade the
+same handler falls through to. So sync walks **`/api/history`**, which pages through every
+document newest-first with no search term.
+
+That feed carries metadata only — url, title, added, updated, add_count, favicon_key — so text
+arrives in a second pass through **`/api/batch`** with `get` operations, 25 URLs at a time. Sync
+is therefore two-stage: enumeration is fast and makes the app usable and Spotlight populated
+straight away, then enrichment fills in excerpts in bounded, resumable batches, so a large index
+fills in over several syncs rather than one very long one.
+
+Two details worth knowing if you touch this code: `/api/history`'s `last` parameter is the
+previous response's `page_key`, not a URL despite the name (a URL there is ignored and every page
+repeats the first), and it parses `date_from` as a Unix timestamp while `/search` wants
+`YYYY-MM-DD`.
 
 ## What the offline cache holds
 

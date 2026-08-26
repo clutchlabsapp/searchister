@@ -4,27 +4,43 @@ import Testing
 
 @Suite("SyncEngine")
 struct SyncEngineTests {
-    @Test("seed follows page_key until the pages run out")
+    private func page(_ documents: [HisterDocument], next: String? = nil) -> HisterHistoryPage {
+        HisterHistoryPage(documents: documents, pageKey: next)
+    }
+
+    /// Sync must go through `/api/history`, never `/search`: `/search` answers
+    /// `400 {"error":"text query required for format=json"}` for the empty query an
+    /// enumeration needs, which is the bug this design exists to avoid.
+    @Test("sync never calls the search endpoint")
+    func neverSearches() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1")])]
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(api.recordedQueries.isEmpty)
+        #expect(!api.recordedHistoryCursors.isEmpty)
+    }
+
+    @Test("seed follows the history cursor until the pages run out")
     func seedPaginates() async throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
         let api = FakeHisterAPI()
         api.statsCount = 3
-        api.pages = [
-            nil: HisterResults(
-                total: 3,
-                documents: [
-                    makeDocument(url: "https://example.com/1", title: "One", updated: 300),
-                    makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
-                ],
-                pageKey: "page-2"
-            ),
-            "page-2": HisterResults(
-                total: 3,
-                documents: [makeDocument(url: "https://example.com/3", title: "Three", updated: 100)],
-                pageKey: nil
-            ),
+        api.historyPages = [
+            nil: page([
+                makeDocument(url: "https://example.com/1", title: "One", updated: 300),
+                makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
+            ], next: "cursor-2"),
+            "cursor-2": page([
+                makeDocument(url: "https://example.com/3", title: "Three", updated: 100),
+            ]),
         ]
 
         let engine = SyncEngine(client: api, index: index)
@@ -43,19 +59,18 @@ struct SyncEngineTests {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
-        // Simulate a previous run that got as far as page 2 before being killed.
-        try index.setSyncValue("page-2", for: .seedPageKey)
+        try index.setSyncValue("cursor-2", for: .seedPageKey)
 
         let api = FakeHisterAPI()
-        api.pages = [
-            nil: HisterResults(total: 2, documents: [makeDocument(url: "https://example.com/1")], pageKey: "page-2"),
-            "page-2": HisterResults(total: 2, documents: [makeDocument(url: "https://example.com/2")], pageKey: nil),
+        api.historyPages = [
+            nil: page([makeDocument(url: "https://example.com/1")], next: "cursor-2"),
+            "cursor-2": page([makeDocument(url: "https://example.com/2")]),
         ]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.sync()
 
-        #expect(api.recordedQueries.first?.pageKey == "page-2")
+        #expect(api.recordedHistoryCursors.first == "cursor-2")
         #expect(try index.document(url: "https://example.com/1") == nil)
         #expect(try index.document(url: "https://example.com/2") != nil)
     }
@@ -73,14 +88,134 @@ struct SyncEngineTests {
 
         let api = FakeHisterAPI()
         api.statsCount = 0
-        api.pages = [nil: HisterResults(total: 0, documents: [])]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.sync()
 
-        let query = try #require(api.recordedQueries.first)
-        #expect(query.dateFrom == 1_000_000 - SyncEngine.incrementalOverlap)
+        #expect(api.recordedHistorySince.first == 1_000_000 - SyncEngine.incrementalOverlap)
     }
+
+    // MARK: - Enrichment
+
+    /// `/api/history` returns no text, so a seeded row starts with no excerpt and the batch pass
+    /// is what makes offline body search work at all.
+    @Test("enrichment fills in excerpts the history feed cannot supply")
+    func enrichmentFillsExcerpts() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1", title: "One")])]
+        api.storedDocuments = [
+            "https://example.com/1": makeDocument(
+                url: "https://example.com/1",
+                title: "One",
+                text: "Autovacuum reclaims dead tuples.",
+                domain: "example.com"
+            ),
+        ]
+
+        let engine = SyncEngine(client: api, index: index)
+        let report = try await engine.sync()
+
+        #expect(report.enriched == 1)
+        let row = try #require(try index.document(url: "https://example.com/1"))
+        #expect(row.excerpt == "Autovacuum reclaims dead tuples.")
+
+        // And the excerpt is what makes the document findable offline by its body.
+        let (hits, _) = try index.search("autovacuum")
+        #expect(hits.map(\.document.url) == ["https://example.com/1"])
+    }
+
+    /// A NULL excerpt means "not fetched yet" and an empty one means "fetched, no text". Without
+    /// that distinction a text-free document would be re-requested on every sync forever.
+    @Test("a document with no text is not re-requested")
+    func textlessDocumentSettles() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.historyPages = [nil: page([makeDocument(url: "https://example.com/1")])]
+        api.storedDocuments = ["https://example.com/1": makeDocument(url: "https://example.com/1")]
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+        #expect(try index.countMissingExcerpt() == 0)
+
+        let firstPassBatches = api.recordedBatchURLs.count
+        _ = try await engine.enrich(budget: 100)
+        #expect(api.recordedBatchURLs.count == firstPassBatches)
+    }
+
+    /// A URL deleted between enumeration and enrichment comes back as a per-item 404 and must not
+    /// stall the pass or be retried forever.
+    @Test("a URL the batch cannot answer for is not retried")
+    func unansweredURLSettles() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert([CachedDocument(document: makeDocument(url: "https://example.com/gone"))])
+
+        let api = FakeHisterAPI()
+        let engine = SyncEngine(client: api, index: index)
+        let enriched = try await engine.enrich(budget: 100)
+
+        #expect(enriched == 1)
+        #expect(try index.countMissingExcerpt() == 0)
+    }
+
+    @Test("enrichment stops at its budget and resumes next run")
+    func enrichmentIsBudgeted() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let documents = (0..<10).map { makeDocument(url: "https://example.com/\($0)", text: "body \($0)") }
+        try index.upsert(documents.map { CachedDocument(document: makeDocument(url: $0.url)) })
+
+        let api = FakeHisterAPI()
+        api.storedDocuments = Dictionary(uniqueKeysWithValues: documents.map { ($0.url, $0) })
+
+        let engine = SyncEngine(client: api, index: index)
+        #expect(try await engine.enrich(budget: 4) == 4)
+        #expect(try index.countMissingExcerpt() == 6)
+
+        #expect(try await engine.enrich(budget: 100) == 6)
+        #expect(try index.countMissingExcerpt() == 0)
+    }
+
+    /// A metadata-only page must not blank the text a previous enrichment fetched.
+    @Test("re-syncing metadata preserves a cached excerpt")
+    func metadataPassPreservesExcerpt() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let url = "https://example.com/1"
+        try index.upsert([CachedDocument(document: makeDocument(url: url, text: "the body", updated: 500))])
+        #expect(try index.document(url: url)?.excerpt == "the body")
+
+        // Same document, same timestamp, no text — as /api/history reports it.
+        try index.upsert([CachedDocument(document: makeDocument(url: url, title: "Renamed", updated: 500))])
+
+        let row = try #require(try index.document(url: url))
+        #expect(row.title == "Renamed")
+        #expect(row.excerpt == "the body")
+    }
+
+    /// But a document that actually changed has stale text, so it goes back in the queue.
+    @Test("a changed document drops its cached text for re-enrichment")
+    func changedDocumentIsRequeued() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let url = "https://example.com/1"
+        try index.upsert([CachedDocument(document: makeDocument(url: url, text: "old body", updated: 500))])
+        try index.upsert([CachedDocument(document: makeDocument(url: url, updated: 900))])
+
+        #expect(try index.document(url: url)?.excerpt == nil)
+        #expect(try index.urlsMissingExcerpt(limit: 10) == [url])
+    }
+
+    // MARK: - Reconcile
 
     @Test("reconcile removes documents deleted on the server")
     func reconcileRemovesDeletions() async throws {
@@ -93,10 +228,7 @@ struct SyncEngineTests {
         ])
 
         let api = FakeHisterAPI()
-        api.pages = [nil: HisterResults(
-            total: 1,
-            documents: [makeDocument(url: "https://example.com/kept")]
-        )]
+        api.historyPages = [nil: page([makeDocument(url: "https://example.com/kept")])]
 
         let engine = SyncEngine(client: api, index: index)
         let report = try await engine.reconcile()
@@ -115,29 +247,11 @@ struct SyncEngineTests {
 
         try index.upsert([CachedDocument(document: makeDocument(url: "https://example.com/a"))])
 
-        let api = FakeHisterAPI()
-        api.pages = [nil: HisterResults(total: 0, documents: [])]
-
-        let engine = SyncEngine(client: api, index: index)
+        let engine = SyncEngine(client: FakeHisterAPI(), index: index)
         let report = try await engine.reconcile()
 
         #expect(report.reconciled == false)
         #expect(try index.documentCount() == 1)
-    }
-
-    @Test("reconcile skips text to keep the sweep cheap")
-    func reconcileSkipsText() async throws {
-        let (index, cleanup) = try LocalIndex.temporary()
-        defer { cleanup() }
-
-        let api = FakeHisterAPI()
-        api.pages = [nil: HisterResults(total: 1, documents: [makeDocument(url: "https://example.com/a")])]
-
-        let engine = SyncEngine(client: api, index: index)
-        _ = try await engine.reconcile()
-
-        #expect(api.recordedQueries.first?.includeText == false)
-        #expect(api.recordedQueries.first?.matchAll == true)
     }
 
     @Test("a stats mismatch triggers a reconcile")
@@ -149,9 +263,9 @@ struct SyncEngineTests {
         try index.setSyncValue(String(Int64(Date().timeIntervalSince1970)), for: .lastReconcileAt)
 
         let api = FakeHisterAPI()
-        api.statsCount = 5
-
         let engine = SyncEngine(client: api, index: index)
+
+        api.statsCount = 5
         #expect(try await engine.shouldReconcile())
 
         api.statsCount = 1
@@ -167,7 +281,7 @@ struct SyncEngineTests {
         try index.setSyncValue("1", for: .seedComplete)
 
         let api = FakeHisterAPI()
-        api.pages = [nil: HisterResults(total: 1, documents: [makeDocument(url: "https://example.com/fresh")])]
+        api.historyPages = [nil: page([makeDocument(url: "https://example.com/fresh")])]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.resetAndReseed()

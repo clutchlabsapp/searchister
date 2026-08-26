@@ -44,7 +44,9 @@ struct ClientTests {
         }
 
         let client = makeClient()
-        _ = try await client.search(.everything(includeText: true, limit: 200))
+        var query = HisterQuery(text: "postgres", limit: 20)
+        query.includeText = true
+        _ = try await client.search(query)
 
         let request = try #require(StubURLProtocol.recordedRequests.first)
         let components = try #require(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
@@ -52,10 +54,89 @@ struct ClientTests {
 
         let raw = try #require(components.queryItems?.first(where: { $0.name == "query" })?.value)
         let decoded = try JSONDecoder().decode(HisterQuery.self, from: Data(raw.utf8))
-        #expect(decoded.matchAll == true)
+        #expect(decoded.text == "postgres")
         #expect(decoded.includeText == true)
-        #expect(decoded.sort == "-date")
-        #expect(decoded.limit == 200)
+        #expect(decoded.limit == 20)
+    }
+
+    @Test("history sends the cursor as `last` and the bound as an integer")
+    func historyRequestShape() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(status: 200, body: try! Fixture.data("history"))
+        }
+
+        let client = makeClient()
+        let page = try await client.history(cursor: "[\"1740003600\"]", since: 1_700_000_000)
+
+        let request = try #require(StubURLProtocol.recordedRequests.first)
+        let components = try #require(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        #expect(components.path == "/api/history")
+        #expect(components.queryItems?.first(where: { $0.name == "last" })?.value == "[\"1740003600\"]")
+        // `/api/history` parses date_from as a Unix timestamp, unlike `/search`, which wants
+        // YYYY-MM-DD — sending the wrong one there silently returns an unfiltered feed.
+        #expect(components.queryItems?.first(where: { $0.name == "date_from" })?.value == "1700000000")
+
+        #expect(page.documents.count == 2)
+        #expect(page.pageKey == "[\"1740003500\",\"0:https://example.com/b\"]")
+        // Metadata only: this is why enrichment exists.
+        #expect(page.documents.allSatisfy { $0.text == nil })
+    }
+
+    /// The handler returns a bare `null` once the pages run out, which a plain struct decode
+    /// would treat as a hard error and abort the sync on its last page.
+    @Test("history tolerates the server's null end-of-pages response")
+    func historyHandlesNull() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(status: 200, body: Data("null".utf8))
+        }
+
+        let page = try await makeClient().history(cursor: "cursor", since: nil)
+        #expect(page.documents.isEmpty)
+        #expect(page.pageKey == nil)
+    }
+
+    @Test("batch get posts get operations and drops per-item failures")
+    func batchGetShape() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(status: 200, body: try! Fixture.data("batch_get"))
+        }
+
+        let client = makeClient()
+        let documents = try await client.batchGet(urls: ["https://example.com/a", "https://example.com/b"])
+
+        let request = try #require(StubURLProtocol.recordedRequests.first)
+        #expect(request.url?.path == "/api/batch")
+        #expect(request.httpMethod == "POST")
+
+        struct Sent: Decodable {
+            struct Op: Decodable { let op: String; let url: String }
+            let ops: [Op]
+        }
+        let body = try #require(request.httpBody ?? request.httpBodyStream.map { stream in
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                data.append(buffer, count: read)
+            }
+            return data
+        })
+        let sent = try JSONDecoder().decode(Sent.self, from: body)
+        #expect(sent.ops.count == 2)
+        #expect(sent.ops.allSatisfy { $0.op == "get" })
+
+        // The 404 result is dropped rather than failing the whole batch.
+        #expect(documents.count == 1)
+        #expect(documents[0].text == "The full extracted body of document A.")
     }
 
     @Test("decodes a real search response")
@@ -84,6 +165,8 @@ struct ClientTests {
         #expect(results.documents.isEmpty)
     }
 
+    /// The server's key is `doc_count`; the decoder accepts the other spellings that have
+    /// appeared across releases too.
     @Test("decodes stats and config")
     func decodesStatsAndConfig() throws {
         let stats = try JSONDecoder().decode(HisterStats.self, from: try Fixture.data("stats"))
@@ -94,11 +177,7 @@ struct ClientTests {
         #expect(config.userHandling == false)
     }
 
-    @Test("decodes a history page")
-    func decodesHistory() throws {
-        let page = try JSONDecoder().decode(HisterHistoryPage.self, from: try Fixture.data("history"))
-        #expect(page.documents.count == 2)
-    }
+
 
     @Test(
         "maps the server's status codes onto typed errors",

@@ -175,6 +175,11 @@ private struct StatusBar: View {
             case .updating(let fetched):
                 ProgressView().controlSize(.small)
                 Text("Updating (\(fetched))…")
+            case .enriching(let done, let remaining):
+                ProgressView().controlSize(.small)
+                Text(remaining > 0
+                     ? "Fetching text — \(done) done, \(remaining) to go…"
+                     : "Fetching text (\(done))…")
             case .reconciling:
                 ProgressView().controlSize(.small)
                 Text("Tidying up…")

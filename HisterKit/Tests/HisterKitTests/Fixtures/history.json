@@ -1,6 +1,7 @@
 {
   "documents": [
-    {"url": "https://example.com/a", "title": "A", "updated": 1740003600, "type": 0},
-    {"url": "https://example.com/b", "title": "B", "updated": 1740003500, "type": 0}
-  ]
+    {"id": "0:https://example.com/a", "url": "https://example.com/a", "title": "A", "added": 1740003000, "updated": 1740003600, "add_count": 2, "favicon_key": "abc123"},
+    {"id": "0:https://example.com/b", "url": "https://example.com/b", "title": "B", "added": 1740002000, "updated": 1740003500, "add_count": 1}
+  ],
+  "page_key": "[\"1740003500\",\"0:https://example.com/b\"]"
 }
