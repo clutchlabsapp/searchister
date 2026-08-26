@@ -103,8 +103,8 @@ public struct DocumentExtractor: Sendable {
                     title: filename,
                     // AddPDF requires the caller to have set both URL and type; it fills in the
                     // text itself from the PDF.
-                    type: .remoteFile,
-                    updated: modified.map { Int64($0.timeIntervalSince1970) }
+                    updated: modified.map { Int64($0.timeIntervalSince1970) },
+                    type: .remoteFile
                 ),
                 attachmentURL: spooled
             )
@@ -120,8 +120,8 @@ public struct DocumentExtractor: Sendable {
                 url: remoteURL,
                 title: filename,
                 text: text,
-                type: .remoteFile,
-                updated: modified.map { Int64($0.timeIntervalSince1970) }
+                updated: modified.map { Int64($0.timeIntervalSince1970) },
+                type: .remoteFile
             )
         )
     }
@@ -133,8 +133,8 @@ public struct DocumentExtractor: Sendable {
                 url: remoteFileURL(for: "\(name)-\(Int(Date().timeIntervalSince1970)).txt"),
                 title: name,
                 text: text,
-                type: .remoteFile,
-                updated: Int64(Date().timeIntervalSince1970)
+                updated: Int64(Date().timeIntervalSince1970),
+                type: .remoteFile
             )
         )
     }

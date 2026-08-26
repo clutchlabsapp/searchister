@@ -17,7 +17,7 @@ public struct SpotlightIndexer: Sendable {
     public static let batchSize = 500
 
     private let index: LocalIndex
-    private let searchableIndex: CSSearchableIndex
+    nonisolated(unsafe) private let searchableIndex: CSSearchableIndex
 
     public init(index: LocalIndex, searchableIndex: CSSearchableIndex = .default()) {
         self.index = index

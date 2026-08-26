@@ -9,9 +9,9 @@ struct SearchisterShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: SearchHisterIntent(),
             phrases: [
-                "Search \(.applicationName) for \(\.$query)",
-                "Search my \(.applicationName) index for \(\.$query)",
-                "Find \(\.$query) in \(.applicationName)",
+                "Search \(.applicationName)",
+                "Search my \(.applicationName) index",
+                "Find documents in \(.applicationName)",
             ],
             shortTitle: "Search Hister",
             systemImageName: "magnifyingglass"
