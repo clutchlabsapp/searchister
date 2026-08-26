@@ -73,7 +73,14 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     var recordedBatchURLs: [[String]] = []
     var addedDocuments: [HisterDocument] = []
 
+    /// Set to have `verifyAccess()` fail, standing in for a token the server refuses.
+    var accessDenied = false
+
     func serverConfig() async throws -> HisterServerConfig { HisterServerConfig(version: "test") }
+
+    func verifyAccess() async throws {
+        if accessDenied { throw HisterError.unauthorized(detail: "") }
+    }
 
     func search(_ query: HisterQuery) async throws -> HisterResults {
         recordedQueries.append(query)

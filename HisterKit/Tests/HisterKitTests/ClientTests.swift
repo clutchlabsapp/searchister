@@ -59,6 +59,36 @@ struct ClientTests {
         #expect(decoded.limit == 20)
     }
 
+    /// The regression this guards: the connection test used to call only /api/config (NoAuth) and
+    /// /api/stats (exempt when the server runs in public mode), so on a public instance it
+    /// reported success for a token the server would refuse on every real request.
+    @Test("verifyAccess probes an endpoint the server never exempts from auth")
+    func verifyAccessUsesAuthenticatedEndpoint() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(status: 200, body: try! Fixture.data("history"))
+        }
+
+        try await makeClient().verifyAccess()
+
+        let path = try #require(StubURLProtocol.recordedRequests.first?.url?.path)
+        #expect(path == "/api/history")
+        #expect(path != "/api/stats")
+        #expect(path != "/api/config")
+    }
+
+    @Test("verifyAccess surfaces a refused token")
+    func verifyAccessReportsRejection() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in StubURLProtocol.Response(status: 403, body: Data()) }
+
+        await #expect(throws: HisterError.unauthorized(detail: "")) {
+            try await makeClient().verifyAccess()
+        }
+    }
+
     @Test("history sends the cursor as `last` and the bound as an integer")
     func historyRequestShape() async throws {
         StubURLProtocol.reset()

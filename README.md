@@ -72,7 +72,18 @@ Every request carries two headers, and both are load-bearing:
 | Header | Why |
 | --- | --- |
 | `Origin: hister://` | Hister's `withCSRF` middleware short-circuits for this origin. A native client has no session cookie to carry a CSRF token in, so without it every endpoint marked `CSRFRequired` — which is most write endpoints — answers 403. |
-| `X-Access-Token` | Authenticates against `app.access_token`. |
+| `X-Access-Token` | Authenticates the request. On a single-user server this is `app.access_token` from the Hister config; with `user_handling` enabled the server matches it against **per-user** tokens instead, so the config value will not work and a personal token from the Hister profile is required. |
+
+### Which endpoints actually check the token
+
+`endpointRequiresAuth` skips the check for any endpoint marked `Public` when the server itself
+runs in public mode. That covers `/search`, `/api/document` and `/api/stats`; `/api/config` is
+`NoAuth` outright. On a public instance every one of those answers 200 for a completely wrong
+token.
+
+`/api/history` and `/api/batch` are `Public: false`, so they are always authenticated — which is
+why "Test connection" probes `/api/history`. Testing against anything else reports success for a
+token that then fails on the first sync.
 
 Endpoints used: `/api/config`, `/search`, `/suggest`, `/api/document`, `/api/preview`,
 `/api/history`, `/api/batch`, `/api/stats`, `/api/add`, `/api/add_pdf`, `/api/label`,

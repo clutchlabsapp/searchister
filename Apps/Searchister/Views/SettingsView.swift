@@ -29,7 +29,7 @@ struct SettingsView: View {
 
                 SecureField("Access token", text: $token, prompt: Text("app.access_token"))
 
-                Text("The token is the `app.access_token` value from your Hister config, sent as the X-Access-Token header.")
+                Text("Sent as the X-Access-Token header. On a single-user server this is `app.access_token` from your Hister config; if your server has multi-user mode enabled it must instead be a personal API token from your Hister profile.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -133,16 +133,33 @@ struct SettingsView: View {
             return
         }
 
+        let savedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let change: AppServices.CredentialsChange
         do {
             change = try AppServices.shared.updateCredentials(
-                HisterCredentials(baseURL: url, accessToken: token.trimmingCharacters(in: .whitespacesAndNewlines))
+                HisterCredentials(baseURL: url, accessToken: savedToken)
             )
         } catch {
             testResult = .failure(error.localizedDescription)
             return
         }
         serverURL = url.absoluteString
+
+        // Prove the token before syncing. Without this, a rejected token surfaces as a failed
+        // sync, which reads like a sync problem rather than a credentials problem.
+        do {
+            let client = HisterClient(credentials: HisterCredentials(baseURL: url, accessToken: savedToken))
+            let config = try await client.serverConfig()
+            do {
+                try await client.verifyAccess()
+            } catch let error as HisterError {
+                testResult = .failure(Self.authFailureMessage(error, config: config))
+                return
+            }
+        } catch {
+            testResult = .failure(error.localizedDescription)
+            return
+        }
 
         testResult = .success(change == .sameServer ? "Saved." : "Saved. Building the offline index…")
 
@@ -174,17 +191,45 @@ struct SettingsView: View {
                 )
             )
 
-            // /api/config is a NoAuth endpoint, so it proves the server is reachable but says
-            // nothing about the token. /api/stats requires auth, so it is what actually tests it.
+            // /api/config is NoAuth, so this only proves the server is reachable.
             let config = try await client.serverConfig()
-            let stats = try await client.stats()
+
+            // This is what proves the token. It has to be an endpoint the server never exempts:
+            // on an instance running in public mode, /api/stats and /search answer 200 for any
+            // token at all, so testing against those reports success and the first sync then
+            // fails with 403.
+            do {
+                try await client.verifyAccess()
+            } catch let error as HisterError {
+                testResult = .failure(Self.authFailureMessage(error, config: config))
+                return
+            }
 
             var message = "Connected"
             if let version = config.version { message += " to Hister \(version)" }
-            if let count = stats.documentCount { message += " — \(count) documents indexed" }
+            if let stats = try? await client.stats(), let count = stats.documentCount {
+                message += " — \(count) documents indexed"
+            }
             testResult = .success(message)
         } catch {
             testResult = .failure(error.localizedDescription)
         }
+    }
+
+    /// Turns a rejected token into something actionable, using the auth mode the server just
+    /// reported.
+    private static func authFailureMessage(_ error: HisterError, config: HisterServerConfig) -> String {
+        guard case .unauthorized = error else { return error.localizedDescription }
+
+        if config.userHandling == true {
+            // With multi-user mode on, the server matches the token against per-user tokens, not
+            // against app.access_token — so the config value is simply the wrong credential here.
+            return "The server accepted the connection but rejected this token. "
+                + "This instance has multi-user mode enabled, so it needs a personal API token "
+                + "from your Hister profile (Profile → regenerate token), not the app.access_token "
+                + "value from the server config."
+        }
+        return "The server accepted the connection but rejected this token. "
+            + "Check it against app.access_token in your Hister config."
     }
 }

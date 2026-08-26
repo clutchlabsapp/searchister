@@ -7,6 +7,7 @@ import Foundation
 /// (see `HisterRequestBuilder`).
 public protocol HisterAPI: Sendable {
     func serverConfig() async throws -> HisterServerConfig
+    func verifyAccess() async throws
     func search(_ query: HisterQuery) async throws -> HisterResults
     func suggest(_ prefix: String) async throws -> [String]
     func document(url: String) async throws -> HisterDocument
@@ -41,6 +42,22 @@ public struct HisterClient: HisterAPI {
 
     public func serverConfig() async throws -> HisterServerConfig {
         try await decode(builder.get("/api/config"))
+    }
+
+    /// Proves the access token is actually accepted, by calling an endpoint that is never exempt
+    /// from authentication.
+    ///
+    /// Most of the read endpoints are not usable for this. `endpointRequiresAuth` skips the check
+    /// entirely for anything marked `Public` when the server itself runs in public mode — which
+    /// covers `/search`, `/api/document` and `/api/stats` — and `/api/config` is `NoAuth`
+    /// outright. On a public instance all of those answer 200 for a completely wrong token, so a
+    /// connection test built on them reports success and the first real request then fails.
+    ///
+    /// `/api/history` is `Public: false, NoAuth: false`, so it is always authenticated. It is
+    /// also the first call sync makes, which is the property that matters: if this succeeds,
+    /// syncing will not fail on authentication.
+    public func verifyAccess() async throws {
+        _ = try await history(cursor: nil, since: nil)
     }
 
     public func search(_ query: HisterQuery) async throws -> HisterResults {
