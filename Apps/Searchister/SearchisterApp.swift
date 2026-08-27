@@ -167,6 +167,11 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
 
+    /// True while a Spotlight open is being serviced and no window should appear.
+    private var isSuppressingWindows = false
+    private var windowObserver: (any NSObjectProtocol)?
+    private var didResignSinceSuppression = false
+
     /// Same reason as iOS: the SwiftUI modifier is not a dependable receiver for this activity.
     func application(
         _ application: NSApplication,
@@ -174,10 +179,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void
     ) -> Bool {
         guard let identifier = SpotlightOpener.identifier(from: userActivity) else { return false }
+
+        // If a window is already on screen the user is using the app, and hiding it would be a
+        // worse surprise than the browser opening behind it.
+        let wasAlreadyInUse = application.windows.contains { $0.isVisible && $0.canBecomeMain }
+
         SpotlightOpener.open(identifier) { url in
             Task { @MainActor in AppServices.shared.pendingSpotlightURL = url }
         }
+
+        // A locally indexed document has nowhere else to open, so that one does want a window.
+        let opensElsewhere = URL(string: identifier)?.scheme != "remote-file"
+        if opensElsewhere, !wasAlreadyInUse {
+            suppressWindows()
+        }
         return true
+    }
+
+    /// Keeps the app window off screen for a launch that only exists to hand a URL to the browser.
+    ///
+    /// The system launches the owning app for any CoreSpotlight hit and there is no way to
+    /// decline that — but there is no requirement to put a window up. SwiftUI's `WindowGroup`
+    /// creates one regardless, and it can arrive after this point, so windows are ordered out as
+    /// they appear rather than only once.
+    private func suppressWindows() {
+        isSuppressingWindows = true
+        didResignSinceSuppression = false
+
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeVisibleNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard self?.isSuppressingWindows == true else { return }
+            (notification.object as? NSWindow)?.orderOut(nil)
+        }
+
+        for window in NSApp.windows where window.isVisible {
+            window.orderOut(nil)
+        }
+        // Ordering windows out is not enough on its own: without this the app still takes the
+        // foreground and the browser opens behind it.
+        NSApp.hide(nil)
+    }
+
+    /// Suppression must not outlive the launch that caused it, or the user could switch to the
+    /// app later and find no window. Resigning active is what marks the hide as having taken
+    /// effect; becoming active again after that is the user asking for the app.
+    func applicationDidResignActive(_ notification: Notification) {
+        if isSuppressingWindows { didResignSinceSuppression = true }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard isSuppressingWindows, didResignSinceSuppression else { return }
+        endWindowSuppression()
+        NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Clicking the Dock icon is the user asking for the app, so stop hiding from them.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        endWindowSuppression()
+        if !hasVisibleWindows {
+            NSApp.windows.first { $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
+
+    private func endWindowSuppression() {
+        guard isSuppressingWindows else { return }
+        isSuppressingWindows = false
+        if let windowObserver {
+            NotificationCenter.default.removeObserver(windowObserver)
+        }
+        windowObserver = nil
+        didResignSinceSuppression = false
+        NSApp.unhide(nil)
     }
 
     private var uploaders: [OutboxUploader] = []
