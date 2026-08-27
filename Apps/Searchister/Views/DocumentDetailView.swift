@@ -9,6 +9,8 @@ struct DocumentDetailView: View {
     @State private var bodyText: String?
     @State private var isLoading = false
     @State private var isShowingExcerpt = false
+    @State private var isConfirmingDelete = false
+    @State private var isDeleting = false
     @State private var labelDraft = ""
     @State private var error: String?
 
@@ -25,6 +27,18 @@ struct DocumentDetailView: View {
             }
         }
         .task(id: url) { await load() }
+        .confirmationDialog(
+            "Delete this document from Hister?",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { Task { await deleteDocument() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // Naming the document matters here: the detail pane can be showing a different
+            // document from the one that was selected when the dialog was opened.
+            Text("“\(document?.displayTitle ?? "")” will be removed from your Hister index and from this device. This cannot be undone.")
+        }
     }
 
     @ViewBuilder
@@ -49,18 +63,33 @@ struct DocumentDetailView: View {
                         Link(destination: link) {
                             Label("Open original", systemImage: "arrow.up.right.square")
                         }
+                        .buttonStyle(.bordered)
                     }
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        isConfirmingDelete = true
+                    } label: {
+                        Label("Delete from Hister", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isDeleting)
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Label", text: $labelDraft, prompt: Text("Add a label"))
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { Task { await saveLabel() } }
+
                     Button {
                         Task { await saveLabel() }
                     } label: {
                         Label("Save label", systemImage: "tag")
                     }
+                    .buttonStyle(.bordered)
                     .disabled(labelDraft == (document.label ?? ""))
                 }
-                .buttonStyle(.bordered)
-
-                TextField("Label", text: $labelDraft, prompt: Text("Add a label"))
-                    .textFieldStyle(.roundedBorder)
 
                 if let error {
                     Text(error)
@@ -123,6 +152,26 @@ struct DocumentDetailView: View {
             guard url == self.url else { return }
             bodyText = full
             isShowingExcerpt = false
+        }
+    }
+
+    private func deleteDocument() async {
+        guard let url else { return }
+        isDeleting = true
+        defer { isDeleting = false }
+
+        do {
+            let client = try HisterClient(store: AppServices.shared.credentials)
+            try await client.deleteDocument(url: url)
+
+            // Remove it locally too, rather than waiting for the next reconcile — otherwise the
+            // document stays searchable and in Spotlight after the user has deleted it.
+            try? AppServices.shared.index?.delete(urls: [url])
+            try? await AppServices.shared.spotlight?.remove(urls: [url])
+            model.documentWasDeleted(url: url)
+            error = nil
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

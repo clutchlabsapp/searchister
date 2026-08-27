@@ -163,6 +163,9 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
 
     func setLabel(url: String, label: String) async throws {}
     func delete(query: String) async throws {}
+
+    var deletedURLs: [String] = []
+    func deleteDocument(url: String) async throws { deletedURLs.append(url) }
     func favicon(key: String) async throws -> Data { Data() }
 }
 

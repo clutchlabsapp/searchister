@@ -84,6 +84,14 @@ final class SearchModel {
         suggestion = outcome.suggestion
     }
 
+    /// Drops a document the user deleted from the on-screen list and the selection, so the UI
+    /// does not keep showing something that no longer exists.
+    func documentWasDeleted(url: String) {
+        hits.removeAll { $0.id == url }
+        if selectedURL == url { selectedURL = nil }
+        refreshCounts()
+    }
+
     func openDocument(url: String) {
         selectedURL = url
         if hits.first(where: { $0.id == url }) == nil,

@@ -19,6 +19,7 @@ public protocol HisterAPI: Sendable {
     func addPDF(_ document: HisterDocument, pdfData: Data) async throws
     func setLabel(url: String, label: String) async throws
     func delete(query: String) async throws
+    func deleteDocument(url: String) async throws
     func favicon(key: String) async throws -> Data
 }
 
@@ -186,6 +187,30 @@ public struct HisterClient: HisterAPI {
         }
         let body = try JSONEncoder().encode(Payload(url: url, label: label))
         _ = try await perform(builder.postJSON("/api/label", body: body), context: url)
+    }
+
+    /// Deletes exactly one document.
+    ///
+    /// Goes through `/api/batch` rather than `/api/delete`, which takes a *search query* — a
+    /// query built from a URL can match more documents than the one on screen, and a delete that
+    /// takes neighbours with it is not recoverable. The batch operation resolves the URL to a
+    /// single document ID server-side.
+    public func deleteDocument(url: String) async throws {
+        struct Operation: Encodable {
+            let op = "delete"
+            let url: String
+        }
+        struct Payload: Encodable {
+            let ops: [Operation]
+        }
+        let body = try JSONEncoder().encode(Payload(ops: [Operation(url: url)]))
+        let data = try await perform(builder.postJSON("/api/batch", body: body), context: url)
+
+        // The batch call answers 200 even when the operation inside it failed.
+        let response = try? JSONDecoder().decode(HisterBatchResponse.self, from: data)
+        if let result = response?.results.first, !(200..<300).contains(result.status) {
+            throw HisterError.httpError(status: result.status, body: result.error ?? "")
+        }
     }
 
     public func delete(query: String) async throws {
