@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: { @Sendable in completionHandler() })
+            uploader.adoptBackgroundEvents(completionHandler: { completionHandler() })
             AppDelegate.retainedUploaders.append(uploader)
         }
     }
@@ -164,12 +164,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 #else
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
 
     /// True while a Spotlight open is being serviced and no window should appear.
     private var isSuppressingWindows = false
-    private var windowObserver: (any NSObjectProtocol)?
     private var didResignSinceSuppression = false
 
     /// Same reason as iOS: the SwiftUI modifier is not a dependable receiver for this activity.
@@ -206,14 +206,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isSuppressingWindows = true
         didResignSinceSuppression = false
 
-        windowObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeVisibleNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard self?.isSuppressingWindows == true else { return }
-            (notification.object as? NSWindow)?.orderOut(nil)
-        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
 
         for window in NSApp.windows where window.isVisible {
             window.orderOut(nil)
@@ -245,13 +243,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    @objc private func windowDidBecomeKey(_ notification: Notification) {
+        guard isSuppressingWindows else { return }
+        (notification.object as? NSWindow)?.orderOut(nil)
+    }
+
     private func endWindowSuppression() {
         guard isSuppressingWindows else { return }
         isSuppressingWindows = false
-        if let windowObserver {
-            NotificationCenter.default.removeObserver(windowObserver)
-        }
-        windowObserver = nil
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
         didResignSinceSuppression = false
         NSApp.unhide(nil)
     }
@@ -280,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: { @Sendable in completionHandler() })
+            uploader.adoptBackgroundEvents(completionHandler: { completionHandler() })
             self.uploaders.append(uploader)
         }
     }

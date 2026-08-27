@@ -34,7 +34,7 @@ public final class OutboxUploader: NSObject, @unchecked Sendable {
     private let credentialsStore: CredentialsStore
     private let role: OutboxSessionRole
     private let lock = NSLock()
-    private var backgroundCompletionHandler: (@Sendable () -> Void)?
+    private var backgroundCompletionHandler: (() -> Void)?
     /// Response bytes accumulated per task id, guarded by `lock`. Hister reports why it refused
     /// a document in the response body, so it is worth keeping to quote back to the user.
     private var responseBodies: [String: Data] = [:]
@@ -96,7 +96,7 @@ public final class OutboxUploader: NSObject, @unchecked Sendable {
 
     /// Called from `application(_:handleEventsForBackgroundURLSession:completionHandler:)`.
     /// Creating the session is enough to make the system replay the finished tasks.
-    public func adoptBackgroundEvents(completionHandler: @escaping @Sendable () -> Void) {
+    public func adoptBackgroundEvents(completionHandler: @escaping () -> Void) {
         lock.lock()
         backgroundCompletionHandler = completionHandler
         lock.unlock()
