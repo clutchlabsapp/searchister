@@ -120,10 +120,13 @@ public struct DocumentExtractor: Sendable {
 
     /// Reads the dictionary `SharePreprocessor.js` produced.
     private func loadWebPage(from provider: NSItemProvider) async throws -> IngestItem? {
-        let results: [String: Any] = try await withCheckedThrowingContinuation { continuation in
+        typealias WebPagePayload = (urlString: String, title: String?, html: String?, text: String?)
+
+        let payload: WebPagePayload = try await withCheckedThrowingContinuation { continuation in
             provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier) { item, error in
                 guard let dictionary = item as? [String: Any],
-                      let payload = dictionary[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any]
+                      let raw = dictionary[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any],
+                      let urlString = raw["url"] as? String
                 else {
                     continuation.resume(
                         throwing: HisterError.unreadableAttachment(
@@ -132,27 +135,24 @@ public struct DocumentExtractor: Sendable {
                     )
                     return
                 }
-                continuation.resume(returning: payload)
+                let title = (raw["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let html  = (raw["html"]  as? String).flatMap { $0.isEmpty ? nil : $0 }
+                let text  = (raw["text"]  as? String).flatMap { $0.isEmpty ? nil : $0 }
+                continuation.resume(returning: (urlString, title, html, text))
             }
         }
 
-        guard let urlString = results["url"] as? String, let url = URL(string: urlString) else {
-            return nil
-        }
-
-        let title = (results["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let html = (results["html"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let text = (results["text"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        guard let url = URL(string: payload.urlString) else { return nil }
 
         return IngestItem(
             kind: .add,
             document: HisterDocument(
                 url: url.absoluteString,
-                html: html,
-                title: title,
+                html: payload.html,
+                title: payload.title,
                 // The server extracts title and text from `html`; `text` is only a fallback for
                 // pages whose markup defeats that extractor.
-                text: html == nil ? text : nil,
+                text: payload.html == nil ? payload.text : nil,
                 type: .webPage
             )
         )
