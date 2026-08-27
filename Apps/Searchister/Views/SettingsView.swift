@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var isTesting = false
     @State private var isResyncing = false
     @State private var newURL = ""
+    @State private var isChoosingShortcutsFolder = false
 
     enum TestResult {
         case success(String)
@@ -92,6 +93,32 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            #if os(macOS)
+            Section("Spotlight") {
+                if let path = model.shortcutsFolderPath {
+                    LabeledContent("Shortcuts folder", value: path)
+                    if let count = model.shortcutCount {
+                        LabeledContent("Shortcuts written", value: "\(count)")
+                    }
+                    Button("Stop writing shortcuts", role: .destructive) {
+                        model.disableShortcuts()
+                    }
+                } else {
+                    Button("Choose a folder for browser shortcuts…") {
+                        isChoosingShortcutsFolder = true
+                    }
+                }
+
+                Text("A Spotlight result that belongs to an app always opens that app — the system has no way to send it anywhere else. Writing each page as an internet shortcut into a folder sidesteps that: Spotlight indexes the shortcuts as ordinary files, and opening one goes straight to your browser without Searchister appearing at all.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let error = model.shortcutsError {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+            }
+            #endif
+
             Section("Diagnostics") {
                 Button("Check what the server will hand over") {
                     Task { await model.runDiagnostics() }
@@ -145,10 +172,19 @@ struct SettingsView: View {
             }
         }
         #endif
+        .fileImporter(
+            isPresented: $isChoosingShortcutsFolder,
+            allowedContentTypes: [.folder]
+        ) { result in
+            if case .success(let directory) = result {
+                model.chooseShortcutsFolder(directory)
+            }
+        }
         .onAppear {
             serverURL = AppServices.shared.credentials.baseURL?.absoluteString ?? ""
             token = AppServices.shared.credentials.accessToken ?? ""
             model.refreshCounts()
+            model.refreshShortcutsState()
         }
     }
 

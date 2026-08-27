@@ -182,6 +182,34 @@ final class SearchModel {
         syncPhase = await engine.phase
     }
 
+    var shortcutsFolderPath: String?
+    var shortcutCount: Int?
+    var shortcutsError: String?
+
+    func refreshShortcutsState() {
+        shortcutsFolderPath = AppServices.shared.shortcutsFolder?.resolve()?.path
+    }
+
+    func chooseShortcutsFolder(_ directory: URL) {
+        do {
+            try AppServices.shared.shortcutsFolder?.store(directory)
+            shortcutCount = AppServices.shared.exportBrowserShortcuts()
+            shortcutsError = nil
+        } catch {
+            shortcutsError = error.localizedDescription
+        }
+        refreshShortcutsState()
+    }
+
+    func disableShortcuts() {
+        if let folder = AppServices.shared.shortcutsFolder?.resolve() {
+            try? WeblocExporter.removeAll(from: folder)
+        }
+        try? AppServices.shared.shortcutsFolder?.clear()
+        shortcutCount = nil
+        refreshShortcutsState()
+    }
+
     var diagnosticsReport: String?
     var isDiagnosing = false
 

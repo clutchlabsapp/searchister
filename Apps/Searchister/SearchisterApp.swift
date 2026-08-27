@@ -73,6 +73,10 @@ enum SpotlightOpener {
         }
         #if os(macOS)
         NSWorkspace.shared.open(url)
+        // The system insists on launching the owning app for a CoreSpotlight hit. It does not
+        // insist on it staying in front. (The shortcuts folder in Settings avoids the launch
+        // entirely, by indexing files that are not owned by this app.)
+        NSApp?.hide(nil)
         #else
         UIApplication.shared.open(url)
         #endif
