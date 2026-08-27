@@ -173,9 +173,23 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
         return HisterHistoryPage(documents: page, pageKey: page.last?.url)
     }
 
-    func batchGet(urls: [String]) async throws -> [HisterDocument] {
+    /// When true, batch requests answer for no slot at all — the whole-request failure that used
+    /// to be mistaken for "these documents have no text".
+    var batchReturnsNothing = false
+
+    func batchGet(urls: [String]) async throws -> [HisterClient.BatchGetResult] {
         recordedBatchURLs.append(urls)
-        return urls.compactMap { storedDocuments[$0] }
+        return urls.map { url in
+            if batchReturnsNothing {
+                return HisterClient.BatchGetResult(requestedURL: url, document: nil, status: 500)
+            }
+            let document = storedDocuments[url]
+            return HisterClient.BatchGetResult(
+                requestedURL: url,
+                document: document,
+                status: document == nil ? 404 : 200
+            )
+        }
     }
 
     func stats() async throws -> HisterStats { HisterStats(documentCount: statsCount) }

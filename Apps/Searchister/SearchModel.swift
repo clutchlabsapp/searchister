@@ -195,6 +195,14 @@ final class SearchModel {
         diagnosticsReport = await engine.diagnose()
     }
 
+    /// Puts every document recorded as having no text back in the queue, then refetches.
+    func refetchMissingText() async {
+        guard let index = AppServices.shared.index else { return }
+        let requeued = (try? index.retryDocumentsWithoutText()) ?? 0
+        guard requeued > 0 || (try? index.countMissingExcerpt()) ?? 0 > 0 else { return }
+        await fullCheck()
+    }
+
     func flushQueue() async {
         await AppServices.shared.ingest?.flush()
         refreshCounts()

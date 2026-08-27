@@ -167,9 +167,13 @@ struct ClientTests {
         #expect(sent.ops.count == 2)
         #expect(sent.ops.allSatisfy { $0.op == "get" })
 
-        // The 404 result is dropped rather than failing the whole batch.
-        #expect(documents.count == 1)
-        #expect(documents[0].text == "The full extracted body of document A.")
+        // One slot per requested URL, paired positionally — a 404 slot does not fail the batch.
+        #expect(documents.count == 2)
+        #expect(documents[0].requestedURL == "https://example.com/a")
+        #expect(documents[0].document?.text == "The full extracted body of document A.")
+        #expect(documents[1].requestedURL == "https://example.com/b")
+        #expect(documents[1].document == nil)
+        #expect(documents[1].isDefinitivelyAbsent)
     }
 
     /// Both handlers run `json.NewDecoder` on the body despite listing plain field names in their

@@ -14,7 +14,7 @@ public protocol HisterAPI: Sendable {
     func preview(url: String, extractor: String?) async throws -> String
     func history(cursor: String?, since: Int64?, until: Int64?, filter: String?) async throws -> HisterHistoryPage
     func facets(domainLimit: Int) async throws -> HisterFacets
-    func batchGet(urls: [String]) async throws -> [HisterDocument]
+    func batchGet(urls: [String]) async throws -> [BatchGetResult]
     func stats() async throws -> HisterStats
     func add(_ document: HisterDocument) async throws
     func addPDF(_ document: HisterDocument, pdfData: Data) async throws
@@ -145,7 +145,7 @@ public struct HisterClient: HisterAPI {
     /// `/api/history` carries metadata only, so this is what fills in the text the local excerpts
     /// are built from. URLs the server no longer holds come back as per-item 404s and are simply
     /// dropped rather than failing the batch.
-    public func batchGet(urls: [String]) async throws -> [HisterDocument] {
+    public func batchGet(urls: [String]) async throws -> [BatchGetResult] {
         guard !urls.isEmpty else { return [] }
         struct Operation: Encodable {
             let op = "get"
@@ -154,14 +154,46 @@ public struct HisterClient: HisterAPI {
         struct Payload: Encodable {
             let ops: [Operation]
         }
-        let body = try JSONEncoder().encode(Payload(ops: urls.prefix(Self.maximumBatchSize).map(Operation.init)))
+
+        let requested = Array(urls.prefix(Self.maximumBatchSize))
+        let body = try JSONEncoder().encode(Payload(ops: requested.map(Operation.init)))
         let data = try await perform(builder.postJSON("/api/batch", body: body))
+
+        let response: HisterBatchResponse
         do {
-            let response = try JSONDecoder().decode(HisterBatchResponse.self, from: data)
-            return response.results.compactMap { $0.status == 200 ? $0.document : nil }
+            response = try JSONDecoder().decode(HisterBatchResponse.self, from: data)
         } catch {
             throw HisterError.decodingFailed(String(describing: error))
         }
+
+        // Results line up with the operations positionally, which is the only reliable way to
+        // pair them: the server normalises a URL on the way in — stripping fragments and utm
+        // parameters — so the URL that comes back is not always the one that was asked for.
+        // Matching on the returned URL loses those documents and, worse, files their text under
+        // a second URL that nothing else refers to.
+        guard response.results.count == requested.count else {
+            throw HisterError.decodingFailed(
+                "batch returned \(response.results.count) results for \(requested.count) operations"
+            )
+        }
+        return zip(requested, response.results).map { url, result in
+            BatchGetResult(
+                requestedURL: url,
+                document: result.status == 200 ? result.document : nil,
+                status: result.status
+            )
+        }
+    }
+
+    /// One slot of a batch `get`, paired with the URL that was asked for.
+    public struct BatchGetResult: Sendable {
+        public let requestedURL: String
+        public let document: HisterDocument?
+        public let status: Int
+
+        /// The server answered for this slot and has no such document — as opposed to the whole
+        /// request having failed, which is not the document's fault.
+        public var isDefinitivelyAbsent: Bool { status == 404 }
     }
 
     /// The server rejects a batch of more than 100 operations outright.

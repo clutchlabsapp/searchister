@@ -74,7 +74,9 @@ struct SettingsView: View {
 
                 Button("Check the whole index") { Task { await model.fullCheck() } }
 
-                Text("A full check re-reads every document on the server to pick up deletions and anything an earlier pass missed. It takes a while on a large index; checking for new documents is one or two requests.")
+                Button("Refetch missing text") { Task { await model.refetchMissingText() } }
+
+                Text("A full check re-reads every document on the server to pick up deletions and anything an earlier pass missed. It takes a while on a large index; checking for new documents is one or two requests. Refetching missing text asks again for every document recorded as having none — use it if search is only matching titles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

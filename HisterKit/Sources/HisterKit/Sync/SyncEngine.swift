@@ -383,24 +383,38 @@ public actor SyncEngine {
 
             phase = .enriching(done: enriched, remaining: remaining)
 
-            let documents = try await client.batchGet(urls: urls)
-            let rows = documents.map { document -> CachedDocument in
+            let results = try await client.batchGet(urls: urls)
+
+            let rows = results.compactMap { result -> CachedDocument? in
+                guard var document = result.document else { return nil }
+                // File the text under the URL that was asked for. The server normalises URLs on
+                // the way in, so the one it returns can differ — and writing that one would leave
+                // the original row still empty while creating a second row nothing points at.
+                document.url = result.requestedURL
+
                 var row = CachedDocument(document: document, now: now())
-                // An empty excerpt means "asked, nothing to index" — distinct from NULL, which
-                // means "not asked yet". Without that distinction a document the server holds no
-                // text for would be re-requested on every sync forever.
+                // An empty excerpt means "asked, and there is no text" — distinct from NULL,
+                // "not asked yet". Without the distinction a text-free document is re-requested
+                // on every sync forever.
                 row.excerpt = row.excerpt ?? ""
                 return row
             }
             try index.upsert(rows)
 
-            // URLs the batch did not answer for — deleted between enumeration and enrichment —
-            // get the same treatment, and reconcile removes them later.
-            let answered = Set(documents.map(\.url))
-            try index.markExcerptUnavailable(urls: urls.filter { !answered.contains($0) })
+            // Only give up on a URL the server actually answered for. A slot that failed for any
+            // other reason — or a whole batch that failed — is not evidence the document has no
+            // text, and marking it as such is permanent: nothing ever asks again.
+            let exhausted = results
+                .filter { $0.document == nil && $0.isDefinitivelyAbsent }
+                .map(\.requestedURL)
+            try index.markExcerptUnavailable(urls: exhausted)
 
-            enriched += urls.count
-            remaining = max(0, remaining - urls.count)
+            let settled = rows.count + exhausted.count
+            enriched += settled
+            remaining = max(0, remaining - settled)
+
+            // Nothing in this batch settled, so asking again would loop on the same URLs.
+            guard settled > 0 else { break }
         }
         return enriched
     }
@@ -545,7 +559,12 @@ public actor SyncEngine {
         }
 
         lines.append("")
-        lines.append("Documents still awaiting text: \((try? index.countMissingExcerpt()).map(String.init) ?? "unknown")")
+        // Reported as three separate states on purpose. Collapsing "no text" into "has text"
+        // made a cache where every fetch had failed read as fully populated.
+        lines.append("With body text: \((try? index.countWithText()).map(String.init) ?? "unknown")")
+        lines.append("Recorded as having no text: \((try? index.countWithoutText()).map(String.init) ?? "unknown")")
+        lines.append("Never fetched: \((try? index.countMissingExcerpt()).map(String.init) ?? "unknown")")
+        lines.append("Awaiting Spotlight: \((try? index.countNeedingSpotlight()).map(String.init) ?? "unknown")")
 
         return lines.joined(separator: "\n")
     }

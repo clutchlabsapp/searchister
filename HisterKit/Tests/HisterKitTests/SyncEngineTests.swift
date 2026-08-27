@@ -375,6 +375,77 @@ struct SyncEngineTests {
         #expect(try index.urlsMissingExcerpt(limit: 10) == [url])
     }
 
+    /// The fault behind "search only matches titles". A batch that fails for any reason is not
+    /// evidence that its documents have no text, but they were marked that way — and the marker
+    /// is permanent, so nothing ever asked again and every document ended up with empty text.
+    @Test("a failed batch does not permanently blank documents")
+    func failedBatchDoesNotBlankDocuments() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let documents = (0..<5).map {
+            makeDocument(url: "https://example.com/\($0)", text: "body \($0)")
+        }
+        try index.upsert(documents.map { CachedDocument(document: makeDocument(url: $0.url)) })
+
+        let api = FakeHisterAPI()
+        api.storedDocuments = Dictionary(uniqueKeysWithValues: documents.map { ($0.url, $0) })
+        api.batchReturnsNothing = true
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.enrich(budget: 100)
+
+        // Still queued, not written off.
+        #expect(try index.countWithoutText() == 0)
+        #expect(try index.countMissingExcerpt() == 5)
+
+        api.batchReturnsNothing = false
+        _ = try await engine.enrich(budget: 100)
+        #expect(try index.countWithText() == 5)
+    }
+
+    /// The server normalises URLs on the way in, so the URL a batch returns is not always the one
+    /// that was asked for. Matching on the returned URL left the original row empty and filed the
+    /// text under a second row nothing referred to.
+    @Test("text is filed under the URL that was requested")
+    func textIsFiledUnderRequestedURL() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let requested = "https://example.com/a?utm_source=x"
+        try index.upsert([CachedDocument(document: makeDocument(url: requested))])
+
+        let api = FakeHisterAPI()
+        // The server answers with its normalised form.
+        api.storedDocuments = [
+            requested: makeDocument(url: "https://example.com/a", text: "Pascal appears here."),
+        ]
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.enrich(budget: 100)
+
+        #expect(try index.documentCount() == 1)
+        #expect(try index.document(url: requested)?.excerpt == "Pascal appears here.")
+
+        // And it is findable by a word from the body, which is the whole point.
+        let (hits, _) = try index.search("pascal")
+        #expect(hits.map(\.document.url) == [requested])
+    }
+
+    @Test("documents recorded as having no text can be requeued")
+    func requeueDocumentsWithoutText() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert([CachedDocument(document: makeDocument(url: "https://example.com/a"))])
+        try index.markExcerptUnavailable(urls: ["https://example.com/a"])
+        #expect(try index.countWithoutText() == 1)
+        #expect(try index.countMissingExcerpt() == 0)
+
+        #expect(try index.retryDocumentsWithoutText() == 1)
+        #expect(try index.countMissingExcerpt() == 1)
+    }
+
     // MARK: - Reconcile
 
     @Test("reconcile removes documents deleted on the server")

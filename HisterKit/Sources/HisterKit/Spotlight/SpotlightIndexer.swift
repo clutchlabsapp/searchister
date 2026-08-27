@@ -92,7 +92,7 @@ public struct SpotlightIndexer: Sendable {
         attributes.title = document.displayTitle
         attributes.contentDescription = document.excerpt
         attributes.contentURL = URL(string: document.url)
-        attributes.relatedUniqueIdentifier = document.url
+        attributes.displayName = document.displayTitle
         attributes.contentModificationDate = document.updatedDate
         // `contentDescription` is what Spotlight shows; `textContent` is what it searches. Give
         // it the full text whenever the document has been opened or enriched, since the excerpt

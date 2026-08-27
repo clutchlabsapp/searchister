@@ -236,9 +236,41 @@ public struct LocalIndex: Sendable {
         }
     }
 
+    /// Rows never asked about. Note this excludes rows marked as having no text — those two
+    /// states must be reported separately, or a cache where every fetch failed looks identical to
+    /// one that is fully populated.
     public func countMissingExcerpt() throws -> Int {
         try dbPool.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM documents WHERE excerpt IS NULL") ?? 0
+        }
+    }
+
+    /// Rows that carry actual body text.
+    public func countWithText() throws -> Int {
+        try dbPool.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM documents WHERE excerpt IS NOT NULL AND excerpt != ''"
+            ) ?? 0
+        }
+    }
+
+    /// Rows recorded as having no text at all.
+    public func countWithoutText() throws -> Int {
+        try dbPool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM documents WHERE excerpt = ''") ?? 0
+        }
+    }
+
+    /// Puts every "no text" row back in the queue to be asked about again.
+    ///
+    /// That marker is permanent by design, so a batch that failed for an unrelated reason used to
+    /// blank documents for good. This is the way back.
+    @discardableResult
+    public func retryDocumentsWithoutText() throws -> Int {
+        try dbPool.write { db in
+            try db.execute(sql: "UPDATE documents SET excerpt = NULL WHERE excerpt = ''")
+            return db.changesCount
         }
     }
 
