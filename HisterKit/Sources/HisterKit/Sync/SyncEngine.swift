@@ -556,7 +556,7 @@ public actor SyncEngine {
         try index.setSyncValue(nil, for: .seedComplete)
         try index.setSyncValue(nil, for: .seedPageKey)
         try index.setSyncValue(nil, for: .lastSyncedUpdated)
-        try index.setSyncValue(nil, for: .spotlightClientState)
+        try index.clearSpotlightState()
 
         var report = try await seed()
         report.enriched = try await enrich(budget: Self.enrichmentBudget)

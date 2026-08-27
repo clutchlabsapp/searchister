@@ -26,6 +26,8 @@ public struct CachedDocument: Codable, Sendable, Equatable, Identifiable,
     public var fullText: String?
     /// When this row was last written from a server response.
     public var syncedAt: Int64
+    /// When this row was last handed to Spotlight; `nil` means it still needs publishing.
+    public var spotlightSyncedAt: Int64?
 
     public var id: String { url }
 
@@ -41,7 +43,8 @@ public struct CachedDocument: Codable, Sendable, Equatable, Identifiable,
         faviconKey: String? = nil,
         excerpt: String? = nil,
         fullText: String? = nil,
-        syncedAt: Int64 = Int64(Date().timeIntervalSince1970)
+        syncedAt: Int64 = Int64(Date().timeIntervalSince1970),
+        spotlightSyncedAt: Int64? = nil
     ) {
         self.url = url
         self.title = title
@@ -55,6 +58,7 @@ public struct CachedDocument: Codable, Sendable, Equatable, Identifiable,
         self.excerpt = excerpt
         self.fullText = fullText
         self.syncedAt = syncedAt
+        self.spotlightSyncedAt = spotlightSyncedAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -70,6 +74,7 @@ public struct CachedDocument: Codable, Sendable, Equatable, Identifiable,
         case excerpt
         case fullText = "full_text"
         case syncedAt = "synced_at"
+        case spotlightSyncedAt = "spotlight_synced_at"
     }
 
     public var displayTitle: String {

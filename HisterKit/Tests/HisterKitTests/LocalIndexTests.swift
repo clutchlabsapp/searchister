@@ -95,56 +95,45 @@ struct LocalIndexTests {
         #expect(stored.fullText == "the complete body of the document")
     }
 
-    @Test("changed(after:) pages by (updated, url) without repeating or skipping")
-    func changedAfter() throws {
+    /// The bug this replaces: Spotlight publication used to be tracked by a `(updated, url)`
+    /// cursor, and a row's text arrives *after* it is first written without changing `updated` —
+    /// so it stayed behind the cursor and Spotlight kept the text-free copy forever.
+    @Test("a row needs publishing until it is marked, and again when its text arrives")
+    func spotlightPendingState() throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
+        let url = "https://example.com/a"
+        try index.upsert([CachedDocument(document: makeDocument(url: url, title: "A", updated: 100))])
+        #expect(try index.documentsNeedingSpotlight(limit: 10).map(\.url) == [url])
+
+        try index.markSpotlightIndexed(urls: [url])
+        #expect(try index.documentsNeedingSpotlight(limit: 10).isEmpty)
+
+        // Text arriving is exactly the case the old cursor missed.
+        try index.storeFullText("Pascal appears early in the body.", for: url)
+        #expect(try index.documentsNeedingSpotlight(limit: 10).map(\.url) == [url])
+    }
+
+    /// A full check re-writes every row; republishing all of them each time would be pointless
+    /// work and would keep Spotlight busy forever on a large index.
+    @Test("re-writing an unchanged row does not queue it for Spotlight again")
+    func unchangedRowStaysPublished() throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let document = makeDocument(url: "https://example.com/a", title: "A", updated: 100)
+        try index.upsert([CachedDocument(document: document)])
+        try index.markSpotlightIndexed(urls: ["https://example.com/a"])
+
+        try index.upsert([CachedDocument(document: document)])
+        #expect(try index.documentsNeedingSpotlight(limit: 10).isEmpty)
+
+        // A changed title is a different Spotlight entry, so that one does republish.
         try index.upsert([
-            CachedDocument(document: makeDocument(url: "https://example.com/old", updated: 100)),
-            CachedDocument(document: makeDocument(url: "https://example.com/new", updated: 500)),
+            CachedDocument(document: makeDocument(url: "https://example.com/a", title: "Renamed", updated: 100)),
         ])
-
-        let all = try index.changed(after: LocalIndex.ChangeCursor(), limit: 10)
-        #expect(all.map(\.url) == ["https://example.com/old", "https://example.com/new"])
-
-        // Resuming from the last row returns nothing — the position is exclusive, so a document
-        // is never handed to Spotlight twice.
-        let resumed = try index.changed(
-            after: LocalIndex.ChangeCursor(updated: 500, url: "https://example.com/new"),
-            limit: 10
-        )
-        #expect(resumed.isEmpty)
-    }
-
-    /// Documents sharing a timestamp are the case a timestamp-only cursor cannot page through:
-    /// exclusive skips siblings, inclusive repeats them forever.
-    @Test("documents sharing a timestamp page correctly")
-    func changedAfterSameTimestamp() throws {
-        let (index, cleanup) = try LocalIndex.temporary()
-        defer { cleanup() }
-
-        try index.upsert((0..<3).map {
-            CachedDocument(document: makeDocument(url: "https://example.com/\($0)", updated: 100))
-        })
-
-        var seen: [String] = []
-        var cursor = LocalIndex.ChangeCursor()
-        while true {
-            let page = try index.changed(after: cursor, limit: 1)
-            guard let row = page.first else { break }
-            seen.append(row.url)
-            cursor = LocalIndex.ChangeCursor(updated: row.updated ?? 0, url: row.url)
-        }
-
-        #expect(seen == ["https://example.com/0", "https://example.com/1", "https://example.com/2"])
-    }
-
-    @Test("the change cursor round-trips through sync_state")
-    func changeCursorRoundTrip() {
-        let cursor = LocalIndex.ChangeCursor(updated: 1_740_003_600, url: "https://example.com/a?x=1|2")
-        let restored = LocalIndex.ChangeCursor(rawValue: cursor.rawValue)
-        #expect(restored == cursor)
+        #expect(try index.documentsNeedingSpotlight(limit: 10).count == 1)
     }
 
     @Test("sync state survives a round trip")

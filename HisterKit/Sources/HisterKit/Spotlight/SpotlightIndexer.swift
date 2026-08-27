@@ -24,24 +24,21 @@ public struct SpotlightIndexer: Sendable {
         self.searchableIndex = searchableIndex
     }
 
-    /// Hands Spotlight everything indexed since the last successful pass.
+    /// Publishes every cached document Spotlight does not yet have the current version of.
     ///
-    /// Deliberately does not use `beginBatch()` / `endBatch(withClientState:)`. Those are only
-    /// valid on an index created with `CSSearchableIndex(name:)`; calling them on the shared
-    /// index raises an Objective-C `NSException` ("Batching is not supported for
-    /// CSSearchableIndexShared"), which Swift cannot catch, so it terminates the app — on a code
-    /// path that runs during every sync.
+    /// Driven by a per-row marker rather than a timestamp cursor. A cursor could not work here: a
+    /// row is first written from `/api/history` carrying no text at all, and its text arrives
+    /// later — from the enrichment pass, or from the user opening the document — neither of which
+    /// changes the server-side `updated` the cursor was keyed on. Those rows stayed behind the
+    /// cursor permanently, so Spotlight kept the text-free copy and a document could be found by
+    /// its title and never by its contents.
     ///
-    /// Progress is tracked in `sync_state` instead, as a `(updated, url)` position. That gives up
-    /// the system's own record of which batch it committed, but re-indexing an item is idempotent
-    /// — a `CSSearchableItem` with the same `uniqueIdentifier` replaces the previous one — so the
-    /// only thing the client state really protected against was *missing* items, and advancing
-    /// the cursor solely on a successful completion handler protects against that just as well.
+    /// Deliberately does not use `beginBatch()` / `endBatch(withClientState:)`: those are only
+    /// valid on an index created with `CSSearchableIndex(name:)`, and calling them on the shared
+    /// index raises an Objective-C exception that Swift cannot catch.
     public func indexChangedDocuments() async throws {
-        var cursor = lastIndexedPosition()
-
         while true {
-            let documents = try index.changed(after: cursor, limit: Self.batchSize)
+            let documents = try index.documentsNeedingSpotlight(limit: Self.batchSize)
             guard !documents.isEmpty else { break }
 
             let items = documents.map(Self.searchableItem(for:))
@@ -56,26 +53,20 @@ public struct SpotlightIndexer: Sendable {
                 }
             }
 
-            // The page is ordered by (updated, url), so its last row is the new position.
-            guard let last = documents.last else { break }
-            cursor = LocalIndex.ChangeCursor(updated: last.updated ?? cursor.updated, url: last.url)
-
-            // Only advance once Spotlight has actually accepted the items, so an interrupted or
-            // failed pass resumes from the same place rather than skipping ahead.
-            try index.setSyncValue(cursor.rawValue, for: .spotlightClientState)
-
-            if documents.count < Self.batchSize { break }
+            // Only after Spotlight has accepted them, so a failed pass is retried rather than
+            // silently skipped.
+            try index.markSpotlightIndexed(urls: documents.map(\.url))
         }
     }
 
     /// Rebuilds the Spotlight index from scratch.
     ///
-    /// This is also the recovery path if Spotlight's own index is ever reset out from under the
-    /// app — the local cursor cannot detect that on its own. Settings exposes it as
-    /// "Rebuild cache from scratch".
+    /// Also the recovery path if Spotlight's own index is reset out from under the app, which the
+    /// per-row markers cannot detect on their own. Settings exposes it as "Rebuild cache from
+    /// scratch".
     public func reindexAll() async throws {
         try await deleteAll()
-        try index.setSyncValue(nil, for: .spotlightClientState)
+        try index.clearSpotlightState()
         try await indexChangedDocuments()
     }
 
@@ -96,15 +87,6 @@ public struct SpotlightIndexer: Sendable {
         }
     }
 
-    private func lastIndexedPosition() -> LocalIndex.ChangeCursor {
-        guard let raw = try? index.syncValue(.spotlightClientState),
-              let cursor = LocalIndex.ChangeCursor(rawValue: raw)
-        else {
-            return LocalIndex.ChangeCursor()
-        }
-        return cursor
-    }
-
     static func searchableItem(for document: CachedDocument) -> CSSearchableItem {
         let attributes = CSSearchableItemAttributeSet(contentType: .content)
         attributes.title = document.displayTitle
@@ -112,7 +94,10 @@ public struct SpotlightIndexer: Sendable {
         attributes.contentURL = URL(string: document.url)
         attributes.relatedUniqueIdentifier = document.url
         attributes.contentModificationDate = document.updatedDate
-        attributes.textContent = document.excerpt
+        // `contentDescription` is what Spotlight shows; `textContent` is what it searches. Give
+        // it the full text whenever the document has been opened or enriched, since the excerpt
+        // is only the first page or so and body matches are the point.
+        attributes.textContent = document.fullText ?? document.excerpt
         attributes.keywords = [document.domain, document.label, document.language]
             .compactMap { $0 }
             .filter { !$0.isEmpty }

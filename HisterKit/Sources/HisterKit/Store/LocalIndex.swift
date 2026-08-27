@@ -123,6 +123,24 @@ public struct LocalIndex: Sendable {
             }
         }
 
+        migrator.registerMigration("v3-spotlight-state") { db in
+            // When this row was last handed to Spotlight. NULL means "needs publishing".
+            //
+            // Replaces a global (updated, url) cursor, which could not work: a row is first
+            // written from /api/history with no text at all, and its text arrives later from
+            // enrichment or from the user opening it — neither of which changes `updated`. Those
+            // rows stayed behind the cursor forever, so Spotlight kept the text-free copy and a
+            // document was findable by its title and never by its contents.
+            try db.alter(table: "documents") { t in
+                t.add(column: "spotlight_synced_at", .integer)
+            }
+            try db.create(
+                index: "documents_on_spotlight_synced_at",
+                on: "documents",
+                columns: ["spotlight_synced_at"]
+            )
+        }
+
         return migrator
     }
 
@@ -147,9 +165,59 @@ public struct LocalIndex: Sendable {
                     if row.fullText == nil {
                         row.fullText = unchanged ? existing.fullText : nil
                     }
+                    // Keep the row's Spotlight state unless what Spotlight indexes actually
+                    // changed. A full check re-writes every row, and clearing it blindly would
+                    // republish the entire index on every pass.
+                    row.spotlightSyncedAt = Self.spotlightContentMatches(existing, row)
+                        ? existing.spotlightSyncedAt
+                        : nil
                 }
                 try row.save(db)
             }
+        }
+    }
+
+    /// Whether two versions of a row would produce the same Spotlight entry.
+    static func spotlightContentMatches(_ lhs: CachedDocument, _ rhs: CachedDocument) -> Bool {
+        lhs.title == rhs.title
+            && lhs.excerpt == rhs.excerpt
+            && lhs.fullText == rhs.fullText
+            && lhs.label == rhs.label
+            && lhs.domain == rhs.domain
+            && lhs.language == rhs.language
+            && lhs.updated == rhs.updated
+    }
+
+    /// Rows that still need publishing to Spotlight, newest first.
+    public func documentsNeedingSpotlight(limit: Int) throws -> [CachedDocument] {
+        try dbPool.read { db in
+            try CachedDocument
+                .filter(Column("spotlight_synced_at") == nil)
+                .order(Column("updated").desc)
+                .limit(limit)
+                .fetchAll(db)
+        }
+    }
+
+    public func countNeedingSpotlight() throws -> Int {
+        try dbPool.read { db in
+            try CachedDocument.filter(Column("spotlight_synced_at") == nil).fetchCount(db)
+        }
+    }
+
+    public func markSpotlightIndexed(urls: [String], at date: Date = Date()) throws {
+        guard !urls.isEmpty else { return }
+        try dbPool.write { db in
+            _ = try CachedDocument
+                .filter(urls.contains(Column("url")))
+                .updateAll(db, Column("spotlight_synced_at").set(to: Int64(date.timeIntervalSince1970)))
+        }
+    }
+
+    /// Marks every row as needing publishing again — used when rebuilding the Spotlight index.
+    public func clearSpotlightState() throws {
+        try dbPool.write { db in
+            _ = try CachedDocument.updateAll(db, Column("spotlight_synced_at").set(to: nil))
         }
     }
 
@@ -201,7 +269,10 @@ public struct LocalIndex: Sendable {
                         excerpt = CASE
                             WHEN excerpt IS NULL OR excerpt = '' THEN :excerpt
                             ELSE excerpt
-                        END
+                        END,
+                        -- The whole point of this write is that the document now has text, which
+                        -- is what Spotlight was missing, so it has to be published again.
+                        spotlight_synced_at = NULL
                     WHERE url = :url
                     """,
                 arguments: ["text": text, "excerpt": Excerpt.make(from: text), "url": url]
@@ -253,52 +324,6 @@ public struct LocalIndex: Sendable {
                 .order(Column("updated").desc)
                 .limit(limit)
                 .fetchAll(db)
-        }
-    }
-
-    /// Position in the `(updated, url)` ordering used to page through changed documents.
-    public struct ChangeCursor: Sendable, Equatable {
-        public var updated: Int64
-        public var url: String
-
-        public init(updated: Int64 = 0, url: String = "") {
-            self.updated = updated
-            self.url = url
-        }
-
-        /// Round-trips through `sync_state`, which stores strings.
-        public init?(rawValue: String) {
-            guard let separator = rawValue.firstIndex(of: "|"),
-                  let updated = Int64(rawValue[rawValue.startIndex..<separator])
-            else {
-                return nil
-            }
-            self.updated = updated
-            self.url = String(rawValue[rawValue.index(after: separator)...])
-        }
-
-        public var rawValue: String { "\(updated)|\(url)" }
-    }
-
-    /// Documents after `cursor` in `(updated, url)` order, oldest first.
-    ///
-    /// Keyset pagination rather than a plain `updated >= since`: with a timestamp alone, a cursor
-    /// resting on the newest document either re-reads it on the next pass (inclusive) or risks
-    /// skipping a sibling that shares its timestamp (exclusive). Including the URL makes the
-    /// position exact, so pages never repeat and never skip — which matters because Spotlight
-    /// re-indexing is otherwise silent work repeated on every sync.
-    public func changed(after cursor: ChangeCursor, limit: Int) throws -> [CachedDocument] {
-        try dbPool.read { db in
-            try CachedDocument.fetchAll(
-                db,
-                sql: """
-                    SELECT * FROM documents
-                    WHERE updated > :updated OR (updated = :updated AND url > :url)
-                    ORDER BY updated ASC, url ASC
-                    LIMIT :limit
-                    """,
-                arguments: ["updated": cursor.updated, "url": cursor.url, "limit": limit]
-            )
         }
     }
 
@@ -387,6 +412,4 @@ public enum SyncStateKey: String, Sendable {
     case lastReconcileAt = "last_reconcile_at"
     /// Document count reported by `/api/stats` at the last sync.
     case serverDocumentCount = "server_document_count"
-    /// Client state handed to CoreSpotlight at the end of the last index batch.
-    case spotlightClientState = "spotlight_client_state"
 }
