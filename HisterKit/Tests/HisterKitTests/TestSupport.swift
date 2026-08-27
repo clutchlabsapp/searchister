@@ -95,17 +95,51 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
 
     func preview(url: String, extractor: String?) async throws -> String { "" }
 
-    /// Pages keyed by the `date_to` bound the walk asked for (`nil` = newest). This mirrors how
-    /// sync actually pages: by narrowing the upper date bound, not by the cursor.
+    /// Pages keyed by the `date_to` bound the walk asked for (`nil` = newest).
     var historyWindows: [Int64?: HisterHistoryPage] = [:]
     var recordedHistoryUntil: [Int64?] = []
+
+    /// A whole corpus served the way the real server does. When set, this takes precedence over
+    /// the keyed dictionaries and reproduces the three behaviours that determine whether a walk
+    /// reaches everything: results are newest-first, `date_from` is inclusive, and — the one that
+    /// silently loses documents — **`date_to` is exclusive**.
+    var corpus: [HisterDocument] = []
+    /// Server-side page size. `/api/history` hard-codes 100.
+    var corpusPageSize = 100
 
     func history(cursor: String?, since: Int64?, until: Int64?) async throws -> HisterHistoryPage {
         recordedHistoryCursors.append(cursor)
         recordedHistorySince.append(since)
         recordedHistoryUntil.append(until)
+
+        guard corpus.isEmpty else { return servePage(cursor: cursor, since: since, until: until) }
         if let page = historyWindows[until], cursor == nil { return page }
         return historyPages[cursor] ?? HisterHistoryPage(documents: [])
+    }
+
+    private func servePage(cursor: String?, since: Int64?, until: Int64?) -> HisterHistoryPage {
+        let matching = corpus
+            .filter { document in
+                let updated = document.updated ?? 0
+                if let since, updated < since { return false }
+                // Exclusive, exactly as NewNumericRangeInclusiveQuery(min, max, true, false).
+                if let until, updated >= until { return false }
+                return true
+            }
+            .sorted { lhs, rhs in
+                let left = lhs.updated ?? 0
+                let right = rhs.updated ?? 0
+                return left == right ? lhs.url > rhs.url : left > right
+            }
+
+        var start = 0
+        if let cursor, let position = matching.firstIndex(where: { $0.url == cursor }) {
+            start = position + 1
+        }
+        guard start < matching.count else { return HisterHistoryPage(documents: []) }
+
+        let page = Array(matching[start..<min(start + corpusPageSize, matching.count)])
+        return HisterHistoryPage(documents: page, pageKey: page.last?.url)
     }
 
     func batchGet(urls: [String]) async throws -> [HisterDocument] {

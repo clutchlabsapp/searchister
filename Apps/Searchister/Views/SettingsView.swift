@@ -63,7 +63,11 @@ struct SettingsView: View {
             }
 
             Section("Offline cache") {
-                LabeledContent("Documents cached", value: "\(model.cachedCount)")
+                LabeledContent(
+                    "Documents cached",
+                    value: model.serverCount.map { "\(model.cachedCount) of \($0)" }
+                        ?? "\(model.cachedCount)"
+                )
                 LabeledContent("Queued uploads", value: "\(model.pendingUploads)")
 
                 Button("Sync now") { Task { await model.sync() } }

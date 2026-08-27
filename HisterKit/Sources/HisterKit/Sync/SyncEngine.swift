@@ -112,49 +112,77 @@ public actor SyncEngine {
 
     /// Walks the whole index, newest first, handing each page to `onPage`.
     ///
-    /// Paging is driven by narrowing `date_to` rather than by the `page_key` cursor. The cursor
-    /// maps onto bleve's `SearchAfter`, and the server searches an alias over several indexes
-    /// (documents are routed per language), where `SearchAfter` is applied per child index and
-    /// merged — so pages silently skip documents and a walk ends up seeing roughly half of them.
-    /// A date bound is evaluated by each child index independently and cannot skip.
+    /// Paged by narrowing `date_to`, not by the `page_key` cursor: the cursor maps onto bleve's
+    /// `SearchAfter`, and the server searches an alias over several indexes (documents are routed
+    /// per language), where it is applied per child index and merged.
     ///
-    /// The cursor is still used *within* a timestamp: every web document is stamped
-    /// `updated = now` on the way in, so a bulk import can leave far more than one page sharing a
-    /// single second, and the date bound alone cannot page past that.
+    /// Two details of the server's date filter drive the arithmetic here, and getting either
+    /// wrong loses documents silently:
     ///
-    /// - Parameter onPage: receives each page; returns the number of documents it newly recorded,
+    /// - `date_to` is **exclusive** (`NewNumericRangeInclusiveQuery(min, max, true, false)`), so
+    ///   a bound set to the page's oldest timestamp skips every remaining document *at* that
+    ///   timestamp. The bound is therefore `oldest + 1`, which re-reads that second in full.
+    /// - Every web document is stamped `updated = now` on the way in, so a bulk import leaves
+    ///   many documents sharing one second. A second holding more than a page of them cannot be
+    ///   paged by date at all — the window cannot narrow below one second — so those are walked
+    ///   with the cursor inside a `[T, T+1)` window, where a mis-merged page can only cost that
+    ///   one second rather than the entire remainder of the index.
+    ///
+    /// - Parameter onPage: receives each page; returns how many documents it newly recorded,
     ///   which is what detects a walk that has stopped making progress.
     private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
         var upperBound: Int64?
+
+        while true {
+            let page = try await client.history(cursor: nil, since: nil, until: upperBound)
+            guard !page.documents.isEmpty else { break }
+
+            _ = try onPage(page.documents)
+
+            let timestamps = page.documents.compactMap(\.updated)
+            guard let oldest = timestamps.min(), let newest = timestamps.max() else { break }
+
+            // A full page spanning a single second may have more behind it that no date bound can
+            // reach, since the window cannot narrow below one second.
+            if page.documents.count >= Self.pageSize, oldest == newest {
+                try await drainTimestamp(oldest, onPage: onPage)
+                upperBound = oldest
+                continue
+            }
+
+            // Exclusive bound, so +1 keeps the oldest second in range and nothing is cut off.
+            let next = oldest + 1
+            guard next != upperBound else { break }
+            upperBound = next
+        }
+    }
+
+    /// Walks the documents stamped with exactly `timestamp`, which a date window cannot subdivide.
+    private func drainTimestamp(
+        _ timestamp: Int64,
+        onPage: ([HisterDocument]) throws -> Int
+    ) async throws {
         var cursor: String?
         var stalledPages = 0
 
         while true {
-            let page = try await client.history(cursor: cursor, since: nil, until: upperBound)
-            guard !page.documents.isEmpty else { break }
+            let page = try await client.history(
+                cursor: cursor,
+                since: timestamp,
+                until: timestamp + 1
+            )
+            guard !page.documents.isEmpty else { return }
 
             let added = try onPage(page.documents)
-            let timestamps = page.documents.compactMap(\.updated)
-            let oldest = timestamps.min()
-            let isFullPage = page.documents.count >= Self.pageSize
-
-            if let oldest, oldest != upperBound {
-                // Move the window down. The bound is inclusive, so the boundary documents come
-                // back once more — harmless, since recording them is an upsert.
-                upperBound = oldest
-                cursor = nil
-                stalledPages = 0
-                continue
+            guard page.documents.count >= Self.pageSize,
+                  let next = page.pageKey, !next.isEmpty, next != cursor
+            else {
+                return
             }
 
-            // The window did not move: either the page is entirely one timestamp, or the server
-            // returned no timestamps at all. Fall back to the cursor to get past it.
-            if isFullPage, let next = page.pageKey, !next.isEmpty, next != cursor {
-                cursor = next
-                stalledPages = added > 0 ? 0 : stalledPages + 1
-                if stalledPages < Self.stallLimit { continue }
-            }
-            break
+            cursor = next
+            stalledPages = added > 0 ? 0 : stalledPages + 1
+            if stalledPages >= Self.stallLimit { return }
         }
     }
 

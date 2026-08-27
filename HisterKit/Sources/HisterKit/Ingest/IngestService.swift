@@ -4,9 +4,25 @@ import Foundation
 public struct IngestOutcome: Sendable {
     public var title: String
     public var url: String
+    /// What was actually sent — "page contents" versus "link only" is the difference between a
+    /// document Hister can index and one it files with no title and no body.
+    public var detail: String?
     public var error: Error?
 
     public var succeeded: Bool { error == nil }
+}
+
+extension HisterDocument {
+    /// Human-readable summary of how much of the page is being sent.
+    var ingestSummary: String {
+        if let html, !html.isEmpty {
+            return "Sending page contents (\(html.count / 1024) KB)"
+        }
+        if let text, !text.isEmpty {
+            return "Sending extracted text"
+        }
+        return "Link only — Hister will have no title or body for this page"
+    }
 }
 
 /// The single entry point for everything that adds a document: the share extension, the
@@ -38,10 +54,20 @@ public struct IngestService: Sendable {
                 do {
                     try outbox.enqueue(item)
                     optimisticallyCache(item)
-                    outcomes.append(IngestOutcome(title: item.document.displayTitle, url: item.document.url))
+                    outcomes.append(
+                        IngestOutcome(
+                            title: item.document.displayTitle,
+                            url: item.document.url,
+                            detail: item.document.ingestSummary
+                        )
+                    )
                 } catch {
                     outcomes.append(
-                        IngestOutcome(title: item.document.displayTitle, url: item.document.url, error: error)
+                        IngestOutcome(
+                            title: item.document.displayTitle,
+                            url: item.document.url,
+                            error: error
+                        )
                     )
                 }
             case .failure(let error):
@@ -56,11 +82,17 @@ public struct IngestService: Sendable {
     /// Queues a bare URL — the path used by Shortcuts and by the app's own add field.
     @discardableResult
     public func accept(url: URL, title: String? = nil) async throws -> IngestOutcome {
-        let item = extractor.webItem(url: url, title: title)
+        var item = extractor.webItem(url: url, title: title)
+        // Same reason as the share sheet: a URL on its own gives Hister nothing to extract.
+        item.document.html = await PageFetcher.html(for: url)
         try outbox.enqueue(item)
         optimisticallyCache(item)
         await uploader.flush()
-        return IngestOutcome(title: item.document.displayTitle, url: item.document.url)
+        return IngestOutcome(
+            title: item.document.displayTitle,
+            url: item.document.url,
+            detail: item.document.ingestSummary
+        )
     }
 
     /// Queues a file already on disk.
@@ -70,7 +102,11 @@ public struct IngestService: Sendable {
         try outbox.enqueue(item)
         optimisticallyCache(item)
         await uploader.flush()
-        return IngestOutcome(title: item.document.displayTitle, url: item.document.url)
+        return IngestOutcome(
+            title: item.document.displayTitle,
+            url: item.document.url,
+            detail: item.document.ingestSummary
+        )
     }
 
     /// Retries or clears queued work. Called on app launch and after connectivity returns.

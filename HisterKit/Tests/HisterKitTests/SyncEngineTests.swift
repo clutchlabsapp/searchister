@@ -102,6 +102,73 @@ struct SyncEngineTests {
         #expect(api.recordedHistorySince.first == 1_000_000 - SyncEngine.incrementalOverlap)
     }
 
+    /// The bug this guards: `date_to` is exclusive, so a walk that sets the next bound to the
+    /// page's oldest timestamp skips every remaining document *at* that timestamp. With every web
+    /// document stamped `updated = now`, bulk-added pages cluster into single seconds, and each
+    /// crowded second silently lost its tail — about half the index.
+    @Test("a second holding more than one page is walked completely")
+    func crowdedTimestampsAreNotSkipped() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        // 250 documents share one second — two and a half pages that no date bound can subdivide.
+        api.corpus = (0..<250).map {
+            makeDocument(url: "https://example.com/bulk/\($0)", updated: 1_000)
+        }
+        // ...plus a spread of others above and below it.
+        api.corpus += (0..<40).map {
+            makeDocument(url: "https://example.com/spread/\($0)", updated: Int64(2_000 + $0))
+        }
+        api.corpus += (0..<10).map {
+            makeDocument(url: "https://example.com/old/\($0)", updated: Int64(100 + $0))
+        }
+        api.statsCount = UInt64(api.corpus.count)
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.seed()
+
+        #expect(try index.documentCount() == 300)
+    }
+
+    @Test("a walk covers a corpus with ordinary spread timestamps")
+    func walkCoversSpreadCorpus() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<450).map {
+            makeDocument(url: "https://example.com/\($0)", updated: Int64(1_000 + $0))
+        }
+        api.statsCount = 450
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.seed()
+
+        #expect(try index.documentCount() == 450)
+    }
+
+    /// Reconcile deletes by absence, so it must see the whole corpus before it deletes anything.
+    @Test("reconcile over a crowded corpus deletes only what is really gone")
+    func reconcileOverCrowdedCorpus() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<150).map { makeDocument(url: "https://example.com/\($0)", updated: 1_000) }
+        api.statsCount = 150
+
+        try index.upsert(api.corpus.map { CachedDocument(document: $0) })
+        try index.upsert([CachedDocument(document: makeDocument(url: "https://example.com/gone"))])
+
+        let engine = SyncEngine(client: api, index: index)
+        let report = try await engine.reconcile()
+
+        #expect(report.reconciled)
+        #expect(report.deleted == 1)
+        #expect(try index.documentCount() == 150)
+    }
+
     // MARK: - Enrichment
 
     /// `/api/history` returns no text, so a seeded row starts with no excerpt and the batch pass

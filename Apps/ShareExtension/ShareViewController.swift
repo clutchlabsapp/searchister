@@ -108,6 +108,10 @@ struct ShareView: View {
                                     Text(error.localizedDescription)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                } else if let detail = outcome.detail {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }

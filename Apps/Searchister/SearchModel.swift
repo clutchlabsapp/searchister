@@ -17,6 +17,8 @@ final class SearchModel {
     var isShowingSettings = false
     var syncPhase: SyncPhase = .idle
     var cachedCount: Int = 0
+    /// What the server reports it holds, so a sync that came up short is visible.
+    var serverCount: UInt64?
     var pendingUploads: Int = 0
     var failedUploads: [OutboxItem] = []
     var errorMessage: String?
@@ -187,6 +189,7 @@ final class SearchModel {
     func refreshCounts() {
         if let index = AppServices.shared.index {
             cachedCount = (try? index.documentCount()) ?? 0
+            serverCount = (try? index.syncValue(.serverDocumentCount)).flatMap { $0 }.flatMap(UInt64.init)
         }
         if let ingest = AppServices.shared.ingest {
             pendingUploads = (try? ingest.pendingCount()) ?? 0

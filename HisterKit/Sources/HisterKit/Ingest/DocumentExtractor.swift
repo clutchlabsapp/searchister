@@ -50,7 +50,14 @@ public struct DocumentExtractor: Sendable {
         }
 
         var results = fileItems.map { Result<IngestItem, Error>.success($0) }
-        if let best = Self.richest(of: webCandidates) {
+        if var best = Self.richest(of: webCandidates) {
+            // Nothing but a URL: Hister would index it with no title and no body, so fetch the
+            // page here. Only the Safari share carries a preprocessed DOM; every other host hands
+            // over a bare link.
+            if best.document.html?.isEmpty != false, best.document.text?.isEmpty != false,
+               let url = URL(string: best.document.url) {
+                best.document.html = await PageFetcher.html(for: url)
+            }
             results.append(.success(best))
         }
 
