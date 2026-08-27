@@ -70,7 +70,13 @@ struct SettingsView: View {
                 )
                 LabeledContent("Queued uploads", value: "\(model.pendingUploads)")
 
-                Button("Sync now") { Task { await model.sync() } }
+                Button("Check for new documents") { Task { await model.refreshNewDocuments() } }
+
+                Button("Check the whole index") { Task { await model.fullCheck() } }
+
+                Text("A full check re-reads every document on the server to pick up deletions and anything an earlier pass missed. It takes a while on a large index; checking for new documents is one or two requests.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Button("Rebuild cache from scratch") {
                     Task {
@@ -172,7 +178,7 @@ struct SettingsView: View {
             // app answering offline searches, and Spotlight, out of the old server's index.
             await model.resync()
         } else {
-            await model.sync()
+            await model.fullCheck()
         }
 
         if let error = model.errorMessage {

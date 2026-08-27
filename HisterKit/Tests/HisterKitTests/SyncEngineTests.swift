@@ -196,6 +196,33 @@ struct SyncEngineTests {
         #expect(try index.documentCount() == 150)
     }
 
+    /// Documents can be indexed without an `updated` field — the server's own history handler
+    /// falls back to `Added` when a hit has none — and the date filter is a numeric range on that
+    /// field, so those documents are invisible to every windowed request no matter how the
+    /// windows are chosen. The unbounded pass is the only thing that reaches them.
+    @Test("documents with no updated timestamp are still cached")
+    func documentsWithoutTimestamps() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<120).map {
+            makeDocument(url: "https://example.com/dated/\($0)", updated: Int64(1_000 + $0))
+        }
+        // Invisible to any date-bounded query.
+        api.corpus += (0..<80).map { index -> HisterDocument in
+            var document = makeDocument(url: "https://example.com/undated/\(index)")
+            document.updated = nil
+            return document
+        }
+        api.statsCount = 200
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.seed()
+
+        #expect(try index.documentCount() == 200)
+    }
+
     // MARK: - Enrichment
 
     /// `/api/history` returns no text, so a seeded row starts with no excerpt and the batch pass

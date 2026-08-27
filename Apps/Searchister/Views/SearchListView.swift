@@ -35,7 +35,7 @@ struct SearchListView: View {
         .listStyle(.inset)
         .searchable(text: $model.query, prompt: "Search your index")
         .onChange(of: model.query) { _, _ in model.queryChanged() }
-        .refreshable { await model.sync() }
+        .refreshable { await model.refreshNewDocuments() }
         .overlay {
             if model.hits.isEmpty {
                 EmptyStateView()
@@ -171,7 +171,7 @@ private struct EmptyStateView: View {
                 Button("Open Settings") { showSettings() }
                     .buttonStyle(.borderedProminent)
             } else if model.query.isEmpty {
-                Button("Sync Now") { Task { await model.sync() } }
+                Button("Sync Now") { Task { await model.refreshNewDocuments() } }
                     .buttonStyle(.borderedProminent)
             }
         }

@@ -186,11 +186,25 @@ public struct LocalIndex: Sendable {
     }
 
     /// Caches the complete extracted text of a document the user opened.
+    /// Caches the complete extracted text of a document the user opened, and derives the excerpt
+    /// from it if enrichment has not reached this row yet.
+    ///
+    /// Filling the excerpt here matters beyond this one document: it is what the result list
+    /// shows as a snippet and what Spotlight indexes, so opening a document also makes it findable
+    /// rather than only readable.
     public func storeFullText(_ text: String, for url: String) throws {
         try dbPool.write { db in
             try db.execute(
-                sql: "UPDATE documents SET full_text = ? WHERE url = ?",
-                arguments: [text, url]
+                sql: """
+                    UPDATE documents
+                    SET full_text = :text,
+                        excerpt = CASE
+                            WHEN excerpt IS NULL OR excerpt = '' THEN :excerpt
+                            ELSE excerpt
+                        END
+                    WHERE url = :url
+                    """,
+                arguments: ["text": text, "excerpt": Excerpt.make(from: text), "url": url]
             )
         }
     }

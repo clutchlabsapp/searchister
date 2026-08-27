@@ -95,7 +95,17 @@ final class SearchModel {
 
     // MARK: - Sync and queue
 
-    func sync() async {
+    /// Pulls in documents added since the last sync. Fast, and what the refresh control runs.
+    func refreshNewDocuments() async {
+        await sync(scope: .newDocuments)
+    }
+
+    /// Also re-reads the whole index, picking up deletions and anything earlier passes missed.
+    func fullCheck() async {
+        await sync(scope: .fullCheck)
+    }
+
+    func sync(scope: SyncEngine.SyncScope = .fullCheck) async {
         guard let engine = AppServices.shared.syncEngine() else {
             errorMessage = "Add your Hister server URL and access token in Settings."
             return
@@ -108,7 +118,7 @@ final class SearchModel {
 
         await withPhaseUpdates(from: engine) {
             do {
-                try await AppServices.shared.refresh()
+                try await AppServices.shared.refresh(scope: scope)
                 self.errorMessage = nil
             } catch {
                 self.errorMessage = error.localizedDescription

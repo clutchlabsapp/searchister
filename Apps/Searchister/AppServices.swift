@@ -76,10 +76,10 @@ public final class AppServices {
     /// the sync runs, so the sync brings back the server's own extracted text rather than leaving
     /// the optimistic local row in place. Spotlight goes last because it publishes from the cache.
     @discardableResult
-    public func refresh() async throws -> SyncReport? {
+    public func refresh(scope: SyncEngine.SyncScope = .fullCheck) async throws -> SyncReport? {
         await ingest?.flush()
         guard let engine = syncEngine() else { return nil }
-        let report = try await engine.sync()
+        let report = try await engine.sync(scope: scope)
         // Spotlight failing is not a reason to report the sync as failed — the cache is updated
         // either way, and the next pass re-publishes from the same cursor.
         try? await spotlight?.indexChangedDocuments()

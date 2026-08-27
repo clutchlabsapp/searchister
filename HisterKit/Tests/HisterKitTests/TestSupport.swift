@@ -120,7 +120,13 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     private func servePage(cursor: String?, since: Int64?, until: Int64?) -> HisterHistoryPage {
         let matching = corpus
             .filter { document in
-                let updated = document.updated ?? 0
+                let isBounded = since != nil || until != nil
+                guard let updated = document.updated else {
+                    // A numeric range query matches only documents that *have* the field, so a
+                    // document indexed without `updated` is invisible to any bounded request —
+                    // which is why an unbounded pass exists at all.
+                    return !isBounded
+                }
                 if let since, updated < since { return false }
                 // Exclusive, exactly as NewNumericRangeInclusiveQuery(min, max, true, false).
                 if let until, updated >= until { return false }

@@ -53,11 +53,11 @@ private struct SidebarView: View {
             .toolbar {
                 ToolbarItem {
                     Button {
-                        Task { await model.sync() }
+                        Task { await model.refreshNewDocuments() }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .help("Sync now")
+                    .help("Check for new documents")
                 }
             }
     }

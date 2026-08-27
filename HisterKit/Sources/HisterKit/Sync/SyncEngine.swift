@@ -89,14 +89,25 @@ public actor SyncEngine {
         self.now = now
     }
 
+    /// How much of the index a pass is allowed to touch.
+    public enum SyncScope: Sendable {
+        /// Only documents newer than the last sync. One or two requests — what the refresh
+        /// control does, and what should happen on every foreground.
+        case newDocuments
+        /// Also re-reads the whole index to pick up deletions and anything a previous pass
+        /// missed. Tens of requests against a large index, so it is not the default.
+        case fullCheck
+    }
+
     /// Brings the cache up to date, choosing the cheapest pass that is correct.
     @discardableResult
-    public func sync() async throws -> SyncReport {
+    public func sync(scope: SyncScope = .fullCheck) async throws -> SyncReport {
         do {
             var report: SyncReport
             if try index.syncValue(.seedComplete) == "1" {
-                report = try await incrementalSync()
+                report = try await incrementalSync(scope: scope)
             } else {
+                // Nothing cached yet, so there is no cheap pass to take.
                 report = try await seed()
             }
             report.enriched = try await enrich(budget: Self.enrichmentBudget)
@@ -110,27 +121,34 @@ public actor SyncEngine {
 
     // MARK: - Enumerate
 
-    /// Walks the whole index, newest first, handing each page to `onPage`.
+    /// Walks the whole index, handing each page to `onPage`.
     ///
-    /// Paged by narrowing `date_to`, not by the `page_key` cursor: the cursor maps onto bleve's
-    /// `SearchAfter`, and the server searches an alias over several indexes (documents are routed
-    /// per language), where it is applied per child index and merged.
+    /// Two passes, because neither reaches everything on its own:
     ///
-    /// Two details of the server's date filter drive the arithmetic here, and getting either
-    /// wrong loses documents silently:
+    /// 1. **Date windows.** Paging by narrowing `date_to` avoids the `page_key` cursor, which maps
+    ///    onto bleve's `SearchAfter`; the server searches an alias over several indexes and
+    ///    applies it per child. Two details of the server's filter drive the arithmetic: `date_to`
+    ///    is *exclusive*, so the bound is `oldest + 1` or the tail of that second is skipped; and
+    ///    every web document is stamped `updated = now`, so a bulk import leaves seconds holding
+    ///    more than a page, which no date bound can subdivide.
+    /// 2. **An unbounded cursor walk.** Not redundant: the date filter is a numeric range on the
+    ///    `updated` field, so any document indexed *without* that field is invisible to every
+    ///    windowed request — permanently, no matter how the windows are chosen. The server's own
+    ///    history handler admits these exist, falling back to `Added` when the field is missing
+    ///    from a hit. An unbounded query is a plain match-all and returns them, so this pass is
+    ///    the only way they are ever cached.
     ///
-    /// - `date_to` is **exclusive** (`NewNumericRangeInclusiveQuery(min, max, true, false)`), so
-    ///   a bound set to the page's oldest timestamp skips every remaining document *at* that
-    ///   timestamp. The bound is therefore `oldest + 1`, which re-reads that second in full.
-    /// - Every web document is stamped `updated = now` on the way in, so a bulk import leaves
-    ///   many documents sharing one second. A second holding more than a page of them cannot be
-    ///   paged by date at all — the window cannot narrow below one second — so those are walked
-    ///   with the cursor inside a `[T, T+1)` window, where a mis-merged page can only cost that
-    ///   one second rather than the entire remainder of the index.
+    /// Both passes record through the same callback and recording is an upsert, so the overlap
+    /// between them costs nothing beyond the requests.
     ///
     /// - Parameter onPage: receives each page; returns how many documents it newly recorded,
     ///   which is what detects a walk that has stopped making progress.
     private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
+        try await walkByDateWindows(onPage: onPage)
+        try await walkByCursor(onPage: onPage)
+    }
+
+    private func walkByDateWindows(onPage: ([HisterDocument]) throws -> Int) async throws {
         var upperBound: Int64?
 
         while true {
@@ -142,18 +160,35 @@ public actor SyncEngine {
             let timestamps = page.documents.compactMap(\.updated)
             guard let oldest = timestamps.min(), let newest = timestamps.max() else { break }
 
-            // A full page spanning a single second may have more behind it that no date bound can
-            // reach, since the window cannot narrow below one second.
             if page.documents.count >= Self.pageSize, oldest == newest {
                 try await drainTimestamp(oldest, onPage: onPage)
                 upperBound = oldest
                 continue
             }
 
-            // Exclusive bound, so +1 keeps the oldest second in range and nothing is cut off.
             let next = oldest + 1
             guard next != upperBound else { break }
             upperBound = next
+        }
+    }
+
+    /// Unbounded match-all walk, which is what reaches documents the date filter cannot see.
+    private func walkByCursor(onPage: ([HisterDocument]) throws -> Int) async throws {
+        var cursor: String?
+        var stalledPages = 0
+
+        while true {
+            let page = try await client.history(cursor: cursor, since: nil, until: nil)
+            guard !page.documents.isEmpty else { return }
+
+            let added = try onPage(page.documents)
+            guard let next = page.pageKey, !next.isEmpty, next != cursor else { return }
+
+            cursor = next
+            // The alias can hand back a page that records nothing new; a few of those in a row
+            // means it is not advancing any more.
+            stalledPages = added > 0 ? 0 : stalledPages + 1
+            if stalledPages >= Self.stallLimit { return }
         }
     }
 
@@ -218,7 +253,7 @@ public actor SyncEngine {
         return SyncReport(upserted: upserted, serverDocumentCount: serverCount)
     }
 
-    func incrementalSync() async throws -> SyncReport {
+    func incrementalSync(scope: SyncScope = .fullCheck) async throws -> SyncReport {
         let lastSynced = Int64(try index.syncValue(.lastSyncedUpdated) ?? "0") ?? 0
         let from = max(0, lastSynced - Self.incrementalOverlap)
 
@@ -242,6 +277,10 @@ public actor SyncEngine {
         try index.setSyncValue(String(highestUpdated), for: .lastSyncedUpdated)
 
         var report = SyncReport(upserted: upserted)
+        // A full check re-reads everything, which takes tens of requests; the refresh control
+        // asks for new documents only and must stay quick.
+        guard scope == .fullCheck else { return report }
+
         if try await shouldReconcile() {
             let outcome = try await reconcile()
             report.deleted = outcome.deleted
