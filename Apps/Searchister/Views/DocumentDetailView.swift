@@ -116,10 +116,20 @@ struct DocumentDetailView: View {
                         }
                     }
                 } else if isLoading {
-                    HStack { ProgressView(); Text("Loading…") }
-                        .foregroundStyle(.secondary)
+                    // No excerpt cached for this document yet, so there is genuinely nothing to
+                    // show while the server is asked. Saying which is happening beats a bare
+                    // spinner that looks like the app has stalled.
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Fetching the text from your server…")
+                        }
+                        Text("This document has not been cached yet. Syncing fills these in over time; once cached it opens instantly.")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
                 } else {
-                    Text("No text cached for this document.")
+                    Text("No text cached for this document, and the server could not be reached.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -140,10 +150,12 @@ struct DocumentDetailView: View {
         // Show the cached copy straight away. The full text is a round trip to the server, and
         // waiting on it behind a spinner made opening a result feel like loading a web page even
         // though the excerpt was already on disk.
-        bodyText = document?.fullText ?? document?.excerpt
-        isShowingExcerpt = document?.fullText == nil
+        let cachedFull = document?.fullText.flatMap { $0.isEmpty ? nil : $0 }
+        let cachedExcerpt = document?.excerpt.flatMap { $0.isEmpty ? nil : $0 }
+        bodyText = cachedFull ?? cachedExcerpt
+        isShowingExcerpt = cachedFull == nil
 
-        guard document?.fullText == nil, let search = AppServices.shared.search else { return }
+        guard cachedFull == nil, let search = AppServices.shared.search else { return }
         isLoading = true
         defer { isLoading = false }
 

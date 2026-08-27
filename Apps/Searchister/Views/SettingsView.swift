@@ -92,6 +92,30 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Diagnostics") {
+                Button("Check what the server will hand over") {
+                    Task { await model.runDiagnostics() }
+                }
+                .disabled(model.isDiagnosing)
+
+                if model.isDiagnosing {
+                    HStack { ProgressView().controlSize(.small); Text("Walking the index…") }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let report = model.diagnosticsReport {
+                    Text(report)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Text("Counts how many documents each way of listing the index actually reaches, so a cache that stays short can be traced to the strategy that is falling short.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Add a link") {
                 HStack {
                     TextField("URL", text: $newURL, prompt: Text("https://…"))

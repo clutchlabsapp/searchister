@@ -60,7 +60,7 @@ public actor SyncEngine {
     /// Documents per enrichment request. Well under the server's cap of 100 because a batch `get`
     /// returns each document's stored HTML alongside its text, so large batches mean very large
     /// responses for data that is thrown away.
-    public static let enrichmentBatchSize = 25
+    public static let enrichmentBatchSize = 10
 
     /// Ceiling on documents enriched in one sync, so a first sync against a large index returns
     /// in reasonable time and the rest fills in on later passes.
@@ -405,6 +405,66 @@ public actor SyncEngine {
             reconciled: true,
             serverDocumentCount: UInt64(live.count)
         )
+    }
+
+    // MARK: - Diagnostics
+
+    /// Reports how many documents each enumeration strategy can actually reach.
+    ///
+    /// The cache has repeatedly settled below the server's own count, and each strategy fails in
+    /// a way that is invisible from the outside — a date-bounded query silently omits documents
+    /// indexed without an `updated` field, and cursor paging runs through an alias over several
+    /// indexes. Comparing the strategies against `/api/stats` says which one is falling short
+    /// instead of leaving it to be inferred.
+    public func diagnose() async -> String {
+        var lines: [String] = []
+
+        let serverTotal = try? await client.stats().documentCount
+        lines.append("Server reports: \(serverTotal.map(String.init) ?? "unknown")")
+        lines.append("Cached locally: \((try? index.documentCount()).map(String.init) ?? "unknown")")
+        lines.append("")
+
+        var byDate = Set<String>()
+        var dateRequests = 0
+        do {
+            try await walkByDateWindows { documents in
+                dateRequests += 1
+                byDate.formUnion(documents.map(\.url))
+                return documents.count
+            }
+            lines.append("Date-window pass: \(byDate.count) documents in \(dateRequests) requests")
+        } catch {
+            lines.append("Date-window pass failed after \(byDate.count): \(error.localizedDescription)")
+        }
+
+        var byCursor = Set<String>()
+        var cursorRequests = 0
+        do {
+            try await walkByCursor { documents in
+                cursorRequests += 1
+                byCursor.formUnion(documents.map(\.url))
+                return documents.count
+            }
+            lines.append("Unbounded cursor pass: \(byCursor.count) documents in \(cursorRequests) requests")
+        } catch {
+            lines.append("Unbounded cursor pass failed after \(byCursor.count): \(error.localizedDescription)")
+        }
+
+        let union = byDate.union(byCursor)
+        lines.append("Combined: \(union.count)")
+        lines.append("Only the date pass reached: \(byDate.subtracting(byCursor).count)")
+        lines.append("Only the cursor pass reached: \(byCursor.subtracting(byDate).count)")
+
+        if let serverTotal, UInt64(union.count) < serverTotal {
+            lines.append("")
+            lines.append("Short by \(serverTotal - UInt64(union.count)). Neither strategy reaches these,")
+            lines.append("so they are not visible through /api/history at all.")
+        }
+
+        lines.append("")
+        lines.append("Documents still awaiting text: \((try? index.countMissingExcerpt()).map(String.init) ?? "unknown")")
+
+        return lines.joined(separator: "\n")
     }
 
     /// Forces a full re-seed — the "Rebuild cache from scratch" action in Settings.

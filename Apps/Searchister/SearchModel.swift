@@ -176,6 +176,19 @@ final class SearchModel {
         syncPhase = await engine.phase
     }
 
+    var diagnosticsReport: String?
+    var isDiagnosing = false
+
+    func runDiagnostics() async {
+        guard let engine = AppServices.shared.syncEngine() else {
+            diagnosticsReport = "Add your Hister server URL and access token in Settings."
+            return
+        }
+        isDiagnosing = true
+        defer { isDiagnosing = false }
+        diagnosticsReport = await engine.diagnose()
+    }
+
     func flushQueue() async {
         await AppServices.shared.ingest?.flush()
         refreshCounts()
