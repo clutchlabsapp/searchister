@@ -389,6 +389,4 @@ public enum SyncStateKey: String, Sendable {
     case serverDocumentCount = "server_document_count"
     /// Client state handed to CoreSpotlight at the end of the last index batch.
     case spotlightClientState = "spotlight_client_state"
-    /// Security-scoped bookmark (base64) for the folder browser shortcuts are written to.
-    case shortcutsFolderBookmark = "shortcuts_folder_bookmark"
 }

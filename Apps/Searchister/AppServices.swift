@@ -50,12 +50,6 @@ public final class AppServices {
         return _ingest
     }
 
-    /// Where browser shortcuts are written, when the user has opted in.
-    public var shortcutsFolder: ShortcutsFolder? {
-        guard let index else { return nil }
-        return ShortcutsFolder(index: index)
-    }
-
     public var spotlight: SpotlightIndexer? {
         guard let index else { return nil }
         if let _spotlight { return _spotlight }
@@ -92,19 +86,7 @@ public final class AppServices {
         // Spotlight failing is not a reason to report the sync as failed — the cache is updated
         // either way, and the next pass re-publishes from the same cursor.
         try? await spotlight?.indexChangedDocuments()
-        exportBrowserShortcuts()
         return report
-    }
-
-    /// Rewrites the browser-shortcut folder from the cache, when one is configured.
-    ///
-    /// Cheap to repeat: the exporter only writes shortcuts that are missing and only deletes ones
-    /// whose document is gone.
-    @discardableResult
-    public func exportBrowserShortcuts() -> Int? {
-        guard let index, let folder = shortcutsFolder?.resolve() else { return nil }
-        guard let documents = try? index.recent(limit: 100_000) else { return nil }
-        return try? WeblocExporter.export(documents, to: folder)
     }
 
     /// Whether the cache has ever been fully populated. Drives the first-connection sync.
