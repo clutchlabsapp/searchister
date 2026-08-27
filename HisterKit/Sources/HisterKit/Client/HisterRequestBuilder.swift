@@ -33,6 +33,13 @@ public struct HisterRequestBuilder: Sendable {
     }
 
     /// A POST request carrying a JSON body.
+    ///
+    /// Every write endpoint this client uses decodes JSON, including `/api/label` and
+    /// `/api/delete` — their API descriptions list plain field names, which reads like form data,
+    /// but their handlers run `json.NewDecoder` on the body. There is deliberately no
+    /// form-encoding helper here: sending one to those endpoints fails at runtime with
+    /// "invalid JSON: invalid character 'u' looking for beginning of value", and nothing in the
+    /// type system would catch it.
     public func postJSON(_ path: String, body: Data) throws -> URLRequest {
         var request = URLRequest(url: try url(path: path))
         request.httpMethod = "POST"
@@ -51,22 +58,6 @@ public struct HisterRequestBuilder: Sendable {
         var request = URLRequest(url: try url(path: path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyCommonHeaders(to: &request)
-        return request
-    }
-
-    /// A POST request carrying form-encoded parameters, which is what `/api/label`,
-    /// `/api/delete` and the legacy `/add` path expect.
-    public func postForm(_ path: String, fields: [String: String]) throws -> URLRequest {
-        var components = URLComponents()
-        components.queryItems = fields.map { URLQueryItem(name: $0.key, value: $0.value) }
-        // `URLComponents` percent-encoding leaves `+` intact, where a form body must escape it.
-        let encoded = (components.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B")
-
-        var request = URLRequest(url: try url(path: path))
-        request.httpMethod = "POST"
-        request.httpBody = Data(encoded.utf8)
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         applyCommonHeaders(to: &request)
         return request
     }

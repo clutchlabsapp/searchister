@@ -178,12 +178,22 @@ public struct HisterClient: HisterAPI {
         _ = try await perform(builder.postJSON("/api/add_pdf", body: body), context: document.url)
     }
 
+    /// Sets or clears a document's label. Pass an empty string to clear it.
     public func setLabel(url: String, label: String) async throws {
-        _ = try await perform(builder.postForm("/api/label", fields: ["url": url, "label": label]))
+        struct Payload: Encodable {
+            let url: String
+            let label: String
+        }
+        let body = try JSONEncoder().encode(Payload(url: url, label: label))
+        _ = try await perform(builder.postJSON("/api/label", body: body), context: url)
     }
 
     public func delete(query: String) async throws {
-        _ = try await perform(builder.postForm("/api/delete", fields: ["query": query]))
+        struct Payload: Encodable {
+            let query: String
+        }
+        let body = try JSONEncoder().encode(Payload(query: query))
+        _ = try await perform(builder.postJSON("/api/delete", body: body))
     }
 
     // MARK: - Transport

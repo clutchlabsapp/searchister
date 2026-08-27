@@ -172,6 +172,57 @@ struct ClientTests {
         #expect(documents[0].text == "The full extracted body of document A.")
     }
 
+    /// Both handlers run `json.NewDecoder` on the body despite listing plain field names in their
+    /// API descriptions. A form-encoded body reaches them as
+    /// "invalid JSON: invalid character 'u' looking for beginning of value".
+    @Test(
+        "write endpoints send JSON, not form data",
+        arguments: [
+            ("label", "/api/label"),
+            ("delete", "/api/delete"),
+        ]
+    )
+    func writeEndpointsSendJSON(operation: String, path: String) async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(status: 200, body: Data(#"{"ok":true}"#.utf8))
+        }
+
+        let client = makeClient()
+        if operation == "label" {
+            try await client.setLabel(url: "https://example.com/a", label: "ops")
+        } else {
+            try await client.delete(query: "site:example.com")
+        }
+
+        let request = try #require(StubURLProtocol.recordedRequests.first)
+        #expect(request.url?.path == path)
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+
+        let body = try #require(request.httpBody ?? request.httpBodyStream.map { stream in
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                data.append(buffer, count: read)
+            }
+            return data
+        })
+        // The decisive check: it must parse as JSON, which a form body does not.
+        let parsed = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        #expect(parsed != nil)
+        if operation == "label" {
+            #expect(parsed?["url"] as? String == "https://example.com/a")
+            #expect(parsed?["label"] as? String == "ops")
+        } else {
+            #expect(parsed?["query"] as? String == "site:example.com")
+        }
+    }
+
     @Test("decodes a real search response")
     func decodesSearchResults() throws {
         let results = try JSONDecoder().decode(HisterResults.self, from: try Fixture.data("search_results"))
