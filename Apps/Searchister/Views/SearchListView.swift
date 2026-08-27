@@ -204,9 +204,11 @@ private struct StatusBar: View {
                 Text(remaining > 0
                      ? "Fetching text — \(done) done, \(remaining) to go…"
                      : "Fetching text (\(done))…")
-            case .reconciling:
+            case .reconciling(let checked):
                 ProgressView().controlSize(.small)
-                Text("Tidying up…")
+                // This walk re-reads the whole index, so it needs to say so — it is slow, and
+                // labelling it "tidying up" made it look like the app had hung.
+                Text(checked > 0 ? "Checking all \(checked) documents…" : "Checking the full index…")
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle")
                 Text(message).lineLimit(1)

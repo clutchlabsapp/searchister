@@ -8,6 +8,7 @@ struct DocumentDetailView: View {
     @State private var document: CachedDocument?
     @State private var bodyText: String?
     @State private var isLoading = false
+    @State private var isShowingExcerpt = false
     @State private var labelDraft = ""
     @State private var error: String?
 
@@ -69,20 +70,25 @@ struct DocumentDetailView: View {
 
                 Divider()
 
-                if isLoading {
-                    HStack { ProgressView(); Text("Loading full text…") }
-                        .foregroundStyle(.secondary)
-                } else if let bodyText, !bodyText.isEmpty {
-                    Text(bodyText)
-                        .textSelection(.enabled)
-                } else if let excerpt = document.excerpt {
+                if let bodyText, !bodyText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(excerpt)
+                        Text(bodyText)
                             .textSelection(.enabled)
-                        Text("This is the cached excerpt. Connect to your server to read the whole document.")
+
+                        if isShowingExcerpt {
+                            HStack(spacing: 6) {
+                                if isLoading { ProgressView().controlSize(.small) }
+                                Text(isLoading
+                                     ? "Showing the cached excerpt while the full text loads…"
+                                     : "This is the cached excerpt. Connect to your server to read the whole document.")
+                            }
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        }
                     }
+                } else if isLoading {
+                    HStack { ProgressView(); Text("Loading…") }
+                        .foregroundStyle(.secondary)
                 } else {
                     Text("No text cached for this document.")
                         .foregroundStyle(.secondary)
@@ -100,15 +106,24 @@ struct DocumentDetailView: View {
         }
         document = try? index.document(url: url)
         labelDraft = document?.label ?? ""
-        bodyText = document?.fullText
         error = nil
 
-        guard bodyText == nil, let search = AppServices.shared.search else { return }
+        // Show the cached copy straight away. The full text is a round trip to the server, and
+        // waiting on it behind a spinner made opening a result feel like loading a web page even
+        // though the excerpt was already on disk.
+        bodyText = document?.fullText ?? document?.excerpt
+        isShowingExcerpt = document?.fullText == nil
+
+        guard document?.fullText == nil, let search = AppServices.shared.search else { return }
         isLoading = true
         defer { isLoading = false }
-        // Falls back to the cached excerpt when the server is unreachable — no error shown,
-        // because the excerpt is a perfectly good offline answer.
-        bodyText = try? await search.fullText(for: url)
+
+        // Silent on failure: the excerpt already on screen is a perfectly good offline answer.
+        if let full = try? await search.fullText(for: url), !full.isEmpty {
+            guard url == self.url else { return }
+            bodyText = full
+            isShowingExcerpt = false
+        }
     }
 
     private func saveLabel() async {

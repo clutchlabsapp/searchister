@@ -6,7 +6,7 @@ public enum SyncPhase: Sendable, Equatable {
     case seeding(fetched: Int, total: UInt64?)
     case updating(fetched: Int)
     case enriching(done: Int, remaining: Int)
-    case reconciling
+    case reconciling(checked: Int)
     case failed(String)
     case finished(Date)
 }
@@ -311,15 +311,31 @@ public actor SyncEngine {
         return UInt64(try index.documentCount()) != serverCount
     }
 
-    /// Walks every live URL, then drops cached rows the server no longer has.
+    /// Walks the whole index, recording everything it sees, then drops cached rows the server no
+    /// longer has.
+    ///
+    /// The walk records rather than merely counting, which makes this the repair path as well as
+    /// the deletion path. It previously fetched every document and discarded it, so a cache that
+    /// had fallen short stayed short forever: the incremental pass is bounded by `date_from` and
+    /// can only ever move forward, so nothing else would go back for the missing documents. Since
+    /// this walk is already paying for the requests, keeping the results costs nothing and means
+    /// a short cache heals itself instead of needing a manual rebuild.
     func reconcile() async throws -> SyncReport {
-        phase = .reconciling
+        phase = .reconciling(checked: 0)
 
         var live = Set<String>()
+        var restored = 0
+        var highestUpdated = Int64(try index.syncValue(.lastSyncedUpdated) ?? "0") ?? 0
+
         try await walkAll { documents in
-            let before = live.count
+            let before = try index.documentCount()
+            _ = try store(documents, highestUpdated: &highestUpdated)
+            let added = try index.documentCount() - before
+            restored += added
+
             live.formUnion(documents.map(\.url))
-            return live.count - before
+            phase = .reconciling(checked: live.count)
+            return added
         }
 
         // A sweep that saw nothing is far more likely to be a broken response than an index the
@@ -328,20 +344,28 @@ public actor SyncEngine {
             return SyncReport(reconciled: false)
         }
 
+        try index.setSyncValue(String(highestUpdated), for: .lastSyncedUpdated)
+
         // Refuse to delete on the strength of a walk that came up short. Deletions are inferred
         // from absence, so an incomplete walk does not look like an error — it looks like the
         // server dropped every document the walk failed to reach, and reconcile would dutifully
         // delete them from the cache.
         if let serverCount = try? await client.stats().documentCount,
            UInt64(live.count) < serverCount {
-            return SyncReport(reconciled: false, serverDocumentCount: serverCount)
+            try index.setSyncValue(String(serverCount), for: .serverDocumentCount)
+            return SyncReport(upserted: restored, reconciled: false, serverDocumentCount: serverCount)
         }
 
         let deleted = try index.deleteMissing(from: live)
         try index.setSyncValue(String(Int64(now().timeIntervalSince1970)), for: .lastReconcileAt)
         try index.setSyncValue(String(live.count), for: .serverDocumentCount)
 
-        return SyncReport(deleted: deleted, reconciled: true, serverDocumentCount: UInt64(live.count))
+        return SyncReport(
+            upserted: restored,
+            deleted: deleted,
+            reconciled: true,
+            serverDocumentCount: UInt64(live.count)
+        )
     }
 
     /// Forces a full re-seed — the "Rebuild cache from scratch" action in Settings.

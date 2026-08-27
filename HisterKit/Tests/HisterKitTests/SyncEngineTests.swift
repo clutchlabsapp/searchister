@@ -148,6 +148,33 @@ struct SyncEngineTests {
         #expect(try index.documentCount() == 450)
     }
 
+    /// The state the app actually got stuck in: a cache left short by an earlier bug. The
+    /// incremental pass is bounded by date_from and only moves forward, so nothing goes back for
+    /// the missing documents — reconcile is the only pass that re-reads everything, and it used
+    /// to fetch them all and throw them away.
+    @Test("reconcile repairs a cache that fell behind the server")
+    func reconcileBackfillsAShortCache() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<300).map {
+            makeDocument(url: "https://example.com/\($0)", updated: Int64(1_000 + $0))
+        }
+        api.statsCount = 300
+
+        // Only a third of the index made it into the cache.
+        try index.upsert(api.corpus.prefix(100).map { CachedDocument(document: $0) })
+        try index.setSyncValue("1", for: .seedComplete)
+        try index.setSyncValue("1299", for: .lastSyncedUpdated)
+
+        let engine = SyncEngine(client: api, index: index)
+        let report = try await engine.sync()
+
+        #expect(try index.documentCount() == 300)
+        #expect(report.deleted == 0)
+    }
+
     /// Reconcile deletes by absence, so it must see the whole corpus before it deletes anything.
     @Test("reconcile over a crowded corpus deletes only what is really gone")
     func reconcileOverCrowdedCorpus() async throws {
