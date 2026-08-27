@@ -14,6 +14,9 @@ public final class AppServices {
 
     public private(set) var index: LocalIndex?
     public private(set) var startupError: String?
+    /// Set when a Spotlight result points at a locally indexed file, which only this app can
+    /// open. The window picks it up and clears it.
+    public var pendingSpotlightURL: String?
 
     public let credentials = CredentialsStore()
 

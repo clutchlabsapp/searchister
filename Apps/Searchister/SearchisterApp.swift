@@ -18,15 +18,7 @@ struct SearchisterApp: App {
     /// The exception is a document indexed from a local file: `remote-file://` is Hister's own
     /// scheme for those, and handing it to the system would only fail, so those open here.
     private func openFromSpotlight(_ identifier: String) {
-        guard let url = URL(string: identifier), url.scheme != "remote-file" else {
-            model.openDocument(url: identifier)
-            return
-        }
-        #if os(macOS)
-        NSWorkspace.shared.open(url)
-        #else
-        UIApplication.shared.open(url)
-        #endif
+        SpotlightOpener.open(identifier) { model.openDocument(url: $0) }
     }
 
     var body: some Scene {
@@ -64,10 +56,53 @@ struct SearchisterApp: App {
     }
 }
 
+/// Opens what a Spotlight result points at.
+///
+/// A result is the page, so it belongs in the browser. The app is launched either way — the
+/// system hands a CoreSpotlight item to whichever app indexed it, and there is no way to have
+/// Spotlight open the URL without that hop — so the app coming to the front first is expected;
+/// what it must not do is *stay* there.
+///
+/// Documents indexed from local files keep opening in the app: `remote-file://` is Hister's own
+/// scheme and the system cannot do anything with it.
+enum SpotlightOpener {
+    static func open(_ identifier: String, fallback: (String) -> Void) {
+        guard let url = URL(string: identifier), url.scheme != "remote-file" else {
+            fallback(identifier)
+            return
+        }
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #else
+        UIApplication.shared.open(url)
+        #endif
+    }
+
+    /// Pulls the item identifier out of a Spotlight continuation activity.
+    static func identifier(from activity: NSUserActivity) -> String? {
+        guard activity.activityType == CSSearchableItemActionType else { return nil }
+        return activity.userInfo?[CSSearchableItemActivityIdentifier] as? String
+    }
+}
+
 #if os(iOS)
 import UIKit
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    /// SwiftUI's `onContinueUserActivity` does not reliably receive this at cold launch, which is
+    /// exactly when a Spotlight tap arrives — so it is handled here as well.
+    func application(
+        _ application: UIApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([any UIUserActivityRestoring]?) -> Void
+    ) -> Bool {
+        guard let identifier = SpotlightOpener.identifier(from: userActivity) else { return false }
+        SpotlightOpener.open(identifier) { url in
+            Task { @MainActor in AppServices.shared.pendingSpotlightURL = url }
+        }
+        return true
+    }
+
     static let backgroundTaskIdentifier = "app.clutchlabs.searchister.sync"
 
     func application(
@@ -131,6 +166,20 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var timer: Timer?
+
+    /// Same reason as iOS: the SwiftUI modifier is not a dependable receiver for this activity.
+    func application(
+        _ application: NSApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void
+    ) -> Bool {
+        guard let identifier = SpotlightOpener.identifier(from: userActivity) else { return false }
+        SpotlightOpener.open(identifier) { url in
+            Task { @MainActor in AppServices.shared.pendingSpotlightURL = url }
+        }
+        return true
+    }
+
     private var uploaders: [OutboxUploader] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -58,7 +58,7 @@ private struct ResultRow: View {
                 if let domain = hit.document.domain, !domain.isEmpty {
                     Text(domain)
                 }
-                if let label = hit.document.label, !label.isEmpty {
+                ForEach(Labels.parse(hit.document.label), id: \.self) { label in
                     Text(label)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)

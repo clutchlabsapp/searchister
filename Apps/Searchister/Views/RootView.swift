@@ -15,6 +15,11 @@ struct RootView: View {
             DocumentDetailView(url: model.selectedURL)
         }
         .task { await model.startup() }
+        .onChange(of: AppServices.shared.pendingSpotlightURL) { _, url in
+            guard let url else { return }
+            model.openDocument(url: url)
+            AppServices.shared.pendingSpotlightURL = nil
+        }
         #else
         NavigationStack {
             SearchListView()
@@ -40,6 +45,11 @@ struct RootView: View {
             }
         }
         .task { await model.startup() }
+        .onChange(of: AppServices.shared.pendingSpotlightURL) { _, url in
+            guard let url else { return }
+            model.openDocument(url: url)
+            AppServices.shared.pendingSpotlightURL = nil
+        }
         #endif
     }
 }

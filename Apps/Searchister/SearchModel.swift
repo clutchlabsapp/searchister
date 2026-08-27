@@ -92,6 +92,12 @@ final class SearchModel {
         refreshCounts()
     }
 
+    /// Runs the query that finds everything carrying this label.
+    func search(forLabel label: String) {
+        query = Labels.searchQuery(for: label)
+        queryChanged()
+    }
+
     func openDocument(url: String) {
         selectedURL = url
         if hits.first(where: { $0.id == url }) == nil,

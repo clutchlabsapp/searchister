@@ -12,6 +12,7 @@ struct DocumentDetailView: View {
     @State private var isConfirmingDelete = false
     @State private var isDeleting = false
     @State private var labelDraft = ""
+    @State private var labels: [String] = []
     @State private var error: String?
 
     var body: some View {
@@ -77,18 +78,36 @@ struct DocumentDetailView: View {
                     .disabled(isDeleting)
                 }
 
-                HStack(spacing: 8) {
-                    TextField("Label", text: $labelDraft, prompt: Text("Add a label"))
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { Task { await saveLabel() } }
-
-                    Button {
-                        Task { await saveLabel() }
-                    } label: {
-                        Label("Save label", systemImage: "tag")
+                VStack(alignment: .leading, spacing: 8) {
+                    if !labels.isEmpty {
+                        FlowLayout {
+                            ForEach(labels, id: \.self) { label in
+                                LabelChip(
+                                    label: label,
+                                    onSearch: { model.search(forLabel: label) },
+                                    onRemove: { labels = Labels.removing(label, from: labels) }
+                                )
+                            }
+                        }
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(labelDraft == (document.label ?? ""))
+
+                    HStack(spacing: 8) {
+                        TextField("Label", text: $labelDraft, prompt: Text("Add a label"))
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { commitDraftLabel() }
+                            // Typing a comma is the other natural way to finish a label.
+                            .onChange(of: labelDraft) { _, new in
+                                if new.hasSuffix(",") { commitDraftLabel() }
+                            }
+
+                        Button {
+                            Task { await saveLabel() }
+                        } label: {
+                            Label("Save labels", systemImage: "tag")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!hasUnsavedLabels)
+                    }
                 }
 
                 if let error {
@@ -144,7 +163,8 @@ struct DocumentDetailView: View {
             return
         }
         document = try? index.document(url: url)
-        labelDraft = document?.label ?? ""
+        labels = Labels.parse(document?.label)
+        labelDraft = ""
         error = nil
 
         // Show the cached copy straight away. The full text is a round trip to the server, and
@@ -165,6 +185,17 @@ struct DocumentDetailView: View {
             bodyText = full
             isShowingExcerpt = false
         }
+    }
+
+    /// Labels the user has staged but not saved yet.
+    private var hasUnsavedLabels: Bool {
+        Labels.format(labels) != Labels.format(Labels.parse(document?.label))
+    }
+
+    private func commitDraftLabel() {
+        let candidate = labelDraft.trimmingCharacters(in: CharacterSet(charactersIn: ", \n"))
+        labels = Labels.adding(candidate, to: labels)
+        labelDraft = ""
     }
 
     private func deleteDocument() async {
@@ -189,11 +220,17 @@ struct DocumentDetailView: View {
 
     private func saveLabel() async {
         guard let url else { return }
+        // Anything still in the field counts — saving without pressing Return first should not
+        // quietly discard what the user typed.
+        commitDraftLabel()
+
+        let joined = Labels.format(labels)
         do {
             let client = try HisterClient(store: AppServices.shared.credentials)
-            try await client.setLabel(url: url, label: labelDraft)
+            // An empty string is how the server is told to clear the label.
+            try await client.setLabel(url: url, label: joined)
             if var updated = document {
-                updated.label = labelDraft
+                updated.label = joined
                 try? AppServices.shared.index?.upsert([updated])
                 document = updated
             }
@@ -201,5 +238,34 @@ struct DocumentDetailView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+}
+
+/// One label, with a control to remove it. Tapping the label itself searches for it.
+private struct LabelChip: View {
+    let label: String
+    let onSearch: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: onSearch) {
+                Text(label)
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Search for label \(label)")
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption2)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Remove label \(label)")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.tint.opacity(0.15), in: Capsule())
     }
 }
