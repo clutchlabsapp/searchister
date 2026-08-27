@@ -71,7 +71,12 @@ public struct SearchService: Sendable {
             query.includeText = true
             let results = try await client.search(query)
 
-            let rows = results.documents.map { CachedDocument(document: $0) }
+            // `allDocuments`, not `documents`: the server moves any result the user has opened
+            // for this query before out of `documents` and into `history`. Reading only
+            // `documents` drops exactly the pages they return to most — they show up on screen
+            // (this merges them back) but were never written to the cache, so the same search
+            // offline, or from Spotlight, found nothing.
+            let rows = results.allDocuments.map { CachedDocument(document: $0) }
             try? index.upsert(rows)
 
             return SearchOutcome(
@@ -90,13 +95,22 @@ public struct SearchService: Sendable {
     }
 
     /// Full text for a document, fetched from the server on demand and cached for next time.
+    ///
+    /// `/api/document` is tried first and a `url:` search second. The endpoint resolves a URL to
+    /// a bleve document ID built from the caller's user id, so against an instance whose
+    /// documents belong to a real user it answers 404 for a token-authenticated client — for
+    /// documents the same instance returns happily from a search.
     public func fullText(for url: String) async throws -> String? {
         if let cached = try index.document(url: url)?.fullText {
             return cached
         }
         let client = try clientProvider()
-        let document = try await client.document(url: url)
-        if let text = document.text {
+
+        if let text = try? await client.document(url: url).text, !text.isEmpty {
+            try? index.storeFullText(text, for: url)
+            return text
+        }
+        if let text = try await client.documentBySearch(url: url)?.text, !text.isEmpty {
             try? index.storeFullText(text, for: url)
             return text
         }

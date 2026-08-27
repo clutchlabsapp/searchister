@@ -91,21 +91,37 @@ Endpoints used: `/api/config`, `/search`, `/suggest`, `/api/document`, `/api/pre
 
 ### How sync enumerates the index
 
-`/search` cannot do it. Over HTTP it answers `400 {"error":"text query required for format=json"}`
-for an empty query, and its match-all path is reachable only through the WebSocket upgrade the
-same handler falls through to. So sync walks **`/api/history`**, which pages through every
-document newest-first with no search term.
+Sync leads with a **match-all `/search`**, because it is the only call that enumerates the index
+*and* returns each document's body (`include_text`). The handler does reject an empty query with
+`400 {"error":"text query required for format=json"}`, but that check is literal and comes before
+it looks at `match_all` — so the request carries `*` as its `text`, which the query builder strips
+as a standalone wildcard and turns into a match-all query anyway. One request per 100 documents,
+text included.
 
-That feed carries metadata only — url, title, added, updated, add_count, favicon_key — so text
-arrives in a second pass through **`/api/batch`** with `get` operations, 25 URLs at a time. Sync
-is therefore two-stage: enumeration is fast and makes the app usable and Spotlight populated
-straight away, then enrichment fills in excerpts in bounded, resumable batches, so a large index
-fills in over several syncs rather than one very long one.
+Three cheaper walks run behind it as backstops, because each fails differently: `/api/history` by
+narrowing `date_to`, `/api/history` on an unbounded cursor (the only one that reaches documents
+indexed without an `updated` field, since a date filter is a numeric range on that field), and one
+`filter`ed request per domain from `/api/facets`. They return metadata only, so anything they and
+only they reach is filled in afterwards by an enrichment pass.
 
-Two details worth knowing if you touch this code: `/api/history`'s `last` parameter is the
-previous response's `page_key`, not a URL despite the name (a URL there is ignored and every page
-repeats the first), and it parses `date_from` as a Unix timestamp while `/search` wants
-`YYYY-MM-DD`.
+Details worth knowing if you touch this code:
+
+- **`/api/batch` and `/api/document` resolve a URL to a bleve document ID built from the caller's
+  user id.** A token-authenticated client is user 0, so on an instance whose documents belong to a
+  real user *every* such lookup answers 404 — for documents the same instance returns happily from
+  a search. So a 404 from a batch `get` is checked against a `url:` search before the document is
+  recorded as having no text.
+- **A search response's `history` block holds real results.** `doSearch` does not annotate a hit
+  the user has opened for that query before; it moves it out of `documents` and re-emits it under
+  `history`. Read only `documents` and you drop exactly the pages the user returns to most.
+- **`/api/stats` counts index entries, not documents.** The server searches an alias over
+  per-language indexes and keeps a document in more than one when its detected language changes,
+  so its count can be well above the number of distinct URLs. `diagnose()` reports raw hits
+  alongside distinct URLs so the two are never confused again.
+- `/api/history`'s `last` parameter is the previous response's `page_key`, not a URL despite the
+  name (a URL there is ignored and every page repeats the first), and it parses `date_from` as a
+  Unix timestamp while `/search`'s query-string form wants `YYYY-MM-DD` (the JSON `query` object
+  takes a timestamp).
 
 ## What the offline cache holds
 

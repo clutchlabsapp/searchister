@@ -1,0 +1,30 @@
+{
+ "total": 2,
+ "documents": [
+  {
+   "id": "0:https://example.com/a",
+   "url": "https://example.com/a",
+   "domain": "example.com",
+   "title": "Postgres index maintenance",
+   "text": "Autovacuum keeps bloat under control.",
+   "added": 1740000000,
+   "updated": 1740003600,
+   "type": 0,
+   "user_id": 0
+  }
+ ],
+ "history": [
+  {
+   "url": "https://example.com/pascal",
+   "title": "Pascal's triangle",
+   "text": "Pascal's triangle is a triangular array of the binomial coefficients.",
+   "count": 4,
+   "pinned": false,
+   "id": "0:https://example.com/pascal"
+  }
+ ],
+ "search_duration": "2.1ms",
+ "query_suggestion": "",
+ "page_key": "",
+ "semantic_enabled": false
+}

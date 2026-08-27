@@ -244,6 +244,70 @@ struct ClientTests {
         #expect(results.documents[1].type == .remoteFile)
     }
 
+    /// Two names decide whether the domain walk sees anything at all, and both were wrong: an
+    /// empty `q` builds a *match none* query, and the facet is `domains`, so `size_domain` was
+    /// discarded by the server's own name lookup.
+    @Test("facets asks with a wildcard query and the plural facet name")
+    func facetsUsesTheRightNames() async throws {
+        StubURLProtocol.reset()
+        defer { StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in
+            StubURLProtocol.Response(
+                status: 200,
+                body: Data(#"{"terms":{"domains":{"terms":[{"term":"example.com","count":7}]}}}"#.utf8)
+            )
+        }
+
+        let facets = try await makeClient().facets(domainLimit: 5_000)
+
+        let request = try #require(StubURLProtocol.recordedRequests.first)
+        let components = try #require(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        #expect(components.path == "/api/facets")
+        #expect(components.queryItems?.first(where: { $0.name == "q" })?.value == "*")
+        #expect(components.queryItems?.first(where: { $0.name == "size_domains" })?.value == "5000")
+
+        #expect(facets.terms?[HisterClient.domainFacetName]?.terms?.first?.term == "example.com")
+    }
+
+    /// A match-all enumeration has to satisfy the handler's literal check on `text` before it
+    /// ever reaches `match_all`, so the wildcard placeholder is not cosmetic — without it the
+    /// server answers 400 and sync enumerates nothing.
+    @Test("a match-all query carries the wildcard placeholder and asks for text")
+    func matchAllQueryIsWellFormed() throws {
+        let query = HisterQuery.enumeratingAll(limit: 100, pageKey: "cursor")
+        #expect(!query.text.isEmpty)
+        #expect(query.matchAll == true)
+        #expect(query.includeText == true)
+        #expect(query.pageKey == "cursor")
+
+        let encoded = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(query))
+        let object = try #require(encoded as? [String: Any])
+        #expect(object["match_all"] as? Bool == true)
+        #expect(object["include_text"] as? Bool == true)
+        #expect((object["text"] as? String)?.isEmpty == false)
+    }
+
+    /// `doSearch` does not annotate a result the user has opened for this query before — it moves
+    /// it out of `documents` and re-emits it under `history`. Reading only `documents` therefore
+    /// silently drops the pages the user returns to most, which is exactly what a cache wants to
+    /// keep.
+    @Test("a search response's history block counts as results")
+    func historyBlockIsMergedIntoResults() throws {
+        let results = try JSONDecoder().decode(
+            HisterResults.self,
+            from: try Fixture.data("search_results_with_history")
+        )
+
+        #expect(results.documents.count == 1)
+        #expect(results.history.count == 1)
+
+        let merged = results.allDocuments
+        #expect(merged.count == 2)
+        let recovered = try #require(merged.first { $0.url == "https://example.com/pascal" })
+        #expect(recovered.title == "Pascal's triangle")
+        #expect(recovered.text?.contains("binomial") == true)
+    }
+
     /// The server sends `"documents": null` rather than `[]` when nothing matched, which a naive
     /// non-optional decode would reject.
     @Test("decodes an empty result set with null documents")

@@ -36,22 +36,25 @@ public struct SyncReport: Sendable, Equatable {
 
 /// Keeps `LocalIndex` in step with the server.
 ///
-/// Sync is built on `/api/history`, not `/search`, because `/search` cannot enumerate an index:
-/// over HTTP it answers `400 {"error":"text query required for format=json"}` for an empty query,
-/// and its match-all path is reachable only through the WebSocket upgrade the same handler falls
-/// through to. `/api/history` walks every document newest-first behind an opaque cursor and needs
-/// no search term.
+/// Sync leads with a match-all `/search`, which is the only call that enumerates the index *and*
+/// carries each document's text (`include_text`). That matters because Spotlight can only find
+/// what the cache holds, and everything else the server offers is either metadata-only or
+/// unreliable:
 ///
-/// The cost is that `/api/history` returns metadata only — url, title, added, updated,
-/// add_count, favicon_key — so text arrives in a second pass, `POST /api/batch` with `get`
-/// operations. Sync is therefore two-stage:
+/// - `/api/history` asks bleve for six fields and text is not among them.
+/// - `/api/batch` and `/api/document` resolve a URL to a bleve document ID built from the
+///   *caller's* user id. A token-authenticated client is user 0, so against an instance whose
+///   documents belong to a real user every one of those lookups 404s — while the same documents
+///   come back fine from a search.
 ///
-/// - **Enumerate** (seed or incremental) — cheap, one request per 100 documents, and enough on
-///   its own to make the app usable and Spotlight populated.
-/// - **Enrich** — fills in excerpts for rows that have none, in bounded batches, resumable
-///   across runs so a large index fills in over several syncs instead of one very long one.
+/// So the shape is:
 ///
-/// **Reconcile** exists on top of both because neither endpoint reports deletions.
+/// - **Enumerate** (seed or incremental) — one request per 100 documents, text included, which
+///   is on its own enough to make the app usable and Spotlight populated.
+/// - **Enrich** — a repair pass for rows that arrived from one of the metadata-only walks and
+///   still have no text. Bounded and resumable, so a large index fills in over several syncs.
+///
+/// **Reconcile** exists on top of both because no endpoint reports deletions.
 public actor SyncEngine {
     /// `/api/history` hard-codes 100 results per page server-side; this mirrors it for progress
     /// arithmetic rather than being a request parameter.
@@ -103,6 +106,7 @@ public actor SyncEngine {
     @discardableResult
     public func sync(scope: SyncScope = .fullCheck) async throws -> SyncReport {
         do {
+            try requeueIfNothingHasText()
             var report: SyncReport
             if try index.syncValue(.seedComplete) == "1" {
                 report = try await incrementalSync(scope: scope)
@@ -119,51 +123,90 @@ public actor SyncEngine {
         }
     }
 
+    /// Clears the "asked, and there is no text" marker across the cache when *nothing* in it has
+    /// text.
+    ///
+    /// That marker is permanent by design, so a run of failures that all looked like honest "no
+    /// such document" answers can write off the whole index and leave it that way. A cache of
+    /// hundreds of documents where not one has a single word of text is not a plausible index —
+    /// it is a failed enrichment pass — and this is the one state where re-asking is clearly
+    /// right. A cache where some documents have text is left alone.
+    private func requeueIfNothingHasText() throws {
+        guard try index.countWithText() == 0, try index.countWithoutText() > 0 else { return }
+        _ = try index.retryDocumentsWithoutText()
+    }
+
     // MARK: - Enumerate
 
     /// Walks the whole index, handing each page to `onPage`.
     ///
-    /// Two passes, because neither reaches everything on its own:
+    /// Four passes, in decreasing order of usefulness. Each records through the same callback and
+    /// recording is an upsert, so the overlap between them costs nothing but the requests.
     ///
-    /// 1. **Date windows.** Paging by narrowing `date_to` avoids the `page_key` cursor, which maps
-    ///    onto bleve's `SearchAfter`; the server searches an alias over several indexes and
-    ///    applies it per child. Two details of the server's filter drive the arithmetic: `date_to`
-    ///    is *exclusive*, so the bound is `oldest + 1` or the tail of that second is skipped; and
-    ///    every web document is stamped `updated = now`, so a bulk import leaves seconds holding
-    ///    more than a page, which no date bound can subdivide.
-    /// 2. **An unbounded cursor walk.** Not redundant: the date filter is a numeric range on the
-    ///    `updated` field, so any document indexed *without* that field is invisible to every
-    ///    windowed request — permanently, no matter how the windows are chosen. The server's own
-    ///    history handler admits these exist, falling back to `Added` when the field is missing
-    ///    from a hit. An unbounded query is a plain match-all and returns them, so this pass is
-    ///    the only way they are ever cached.
+    /// 1. **Match-all search.** The main pass, and the only one that brings text with it.
+    /// 2. **Date windows.** Paging by narrowing `date_to` avoids the `page_key` cursor entirely,
+    ///    so it still makes progress if cursor paging misbehaves. Two details of the server's
+    ///    filter drive the arithmetic: `date_to` is *exclusive*, so the bound is `oldest + 1` or
+    ///    the tail of that second is skipped; and every web document is stamped `updated = now`,
+    ///    so a bulk import leaves seconds holding more than a page, which no date bound can
+    ///    subdivide.
+    /// 3. **An unbounded cursor walk.** The date filter is a numeric range on `updated`, so a
+    ///    document indexed *without* that field is invisible to every windowed request, no matter
+    ///    how the windows are chosen. The server's own history handler admits these exist, falling
+    ///    back to `Added` when the field is missing from a hit. An unbounded query is a plain
+    ///    match-all and returns them.
+    /// 4. **Per domain.** One request per domain, so much the most expensive — but it shares no
+    ///    mechanism with the others, which is the point of keeping it. Only a full check or a
+    ///    rebuild walks at all; the refresh control takes the incremental path and never gets
+    ///    here.
     ///
-    /// Both passes record through the same callback and recording is an upsert, so the overlap
-    /// between them costs nothing beyond the requests.
-    ///
-    /// - Parameter onPage: receives each page; returns how many documents it newly recorded,
-    ///   which is what detects a walk that has stopped making progress.
+    /// - Parameter onPage: receives each page; returns how many documents it newly recorded.
     private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
+        try await walkBySearch(onPage: onPage)
         try await walkByDateWindows(onPage: onPage)
         try await walkByCursor(onPage: onPage)
         try await walkByDomain(onPage: onPage)
     }
 
+    /// Pages the whole index through a match-all `/search`, text included.
+    ///
+    /// This is the pass that makes offline and Spotlight search work on document *contents*
+    /// rather than titles alone, because it is the only enumeration the server offers that
+    /// returns `text`.
+    private func walkBySearch(onPage: ([HisterDocument]) throws -> Int) async throws {
+        var cursor: String?
+        var pages = 0
+
+        while pages < Self.maximumWalkPages {
+            let results = try await client.search(HisterQuery.enumeratingAll(limit: Self.pageSize, pageKey: cursor))
+            let documents = results.allDocuments
+            guard !documents.isEmpty else { return }
+
+            _ = try onPage(documents)
+            pages += 1
+
+            // The server only sets `page_key` on a full page, so its absence is the end of the
+            // walk rather than an error.
+            guard let next = results.pageKey, !next.isEmpty, next != cursor else { return }
+            cursor = next
+        }
+    }
+
+    /// Ceiling on pages in any one walk. At 100 documents a page this is 500k documents, far
+    /// beyond a personal index, and exists only so a server that never stops advancing its cursor
+    /// cannot loop forever.
+    static let maximumWalkPages = 5_000
+
     /// Walks the index one domain at a time.
     ///
-    /// The other two passes both stall around a thousand documents on a larger index, and between
-    /// them they reach the same set — so neither is merely a slower version of the other, and
-    /// something they share is the limit. Both list the whole index in one ordering and page
-    /// through it, either by date or by cursor.
-    ///
-    /// This pass never pages. `/api/facets` accepts an empty query, so it yields every domain in
-    /// the index, and `/api/history` accepts a `filter` matched against the URL. Most domains
-    /// hold far fewer than one page of documents, so each is a single unpaged request — no sort
-    /// to page through, no date bound to exclude documents indexed without an `updated` field.
-    /// The handful of domains that do exceed a page fall back to date windows within the filter.
+    /// The expensive pass, kept because it shares no mechanism with the others: `/api/facets`
+    /// lists every domain, `/api/history` takes a `filter` matched against the URL, and most
+    /// domains fit in a single unpaged request. No sort to page through and no date bound, so a
+    /// document only it can reach says something real about the other passes.
     private func walkByDomain(onPage: ([HisterDocument]) throws -> Int) async throws {
         let facets = try await client.facets(domainLimit: Self.domainFacetLimit)
-        guard let domains = facets.terms?["domain"]?.terms, !domains.isEmpty else { return }
+        guard let domains = facets.terms?[HisterClient.domainFacetName]?.terms, !domains.isEmpty
+        else { return }
 
         for (offset, domain) in domains.enumerated() where !domain.term.isEmpty {
             phase = .reconciling(checked: offset)
@@ -243,20 +286,17 @@ public actor SyncEngine {
     /// Unbounded match-all walk, which is what reaches documents the date filter cannot see.
     private func walkByCursor(onPage: ([HisterDocument]) throws -> Int) async throws {
         var cursor: String?
-        var stalledPages = 0
+        var pages = 0
 
-        while true {
+        while pages < Self.maximumWalkPages {
             let page = try await client.history(cursor: cursor, since: nil, until: nil, filter: nil)
             guard !page.documents.isEmpty else { return }
 
-            let added = try onPage(page.documents)
-            guard let next = page.pageKey, !next.isEmpty, next != cursor else { return }
+            _ = try onPage(page.documents)
+            pages += 1
 
+            guard let next = page.pageKey, !next.isEmpty, next != cursor else { return }
             cursor = next
-            // The alias can hand back a page that records nothing new; a few of those in a row
-            // means it is not advancing any more.
-            stalledPages = added > 0 ? 0 : stalledPages + 1
-            if stalledPages >= Self.stallLimit { return }
         }
     }
 
@@ -266,9 +306,9 @@ public actor SyncEngine {
         onPage: ([HisterDocument]) throws -> Int
     ) async throws {
         var cursor: String?
-        var stalledPages = 0
+        var pages = 0
 
-        while true {
+        while pages < Self.maximumWalkPages {
             let page = try await client.history(
                 cursor: cursor,
                 since: timestamp,
@@ -277,22 +317,17 @@ public actor SyncEngine {
             )
             guard !page.documents.isEmpty else { return }
 
-            let added = try onPage(page.documents)
+            _ = try onPage(page.documents)
+            pages += 1
+
             guard page.documents.count >= Self.pageSize,
                   let next = page.pageKey, !next.isEmpty, next != cursor
             else {
                 return
             }
-
             cursor = next
-            stalledPages = added > 0 ? 0 : stalledPages + 1
-            if stalledPages >= Self.stallLimit { return }
         }
     }
-
-    /// How many consecutive pages may record nothing new before a walk gives up. Guards against a
-    /// server that keeps returning the same page for a cursor it cannot advance.
-    static let stallLimit = 3
 
     /// First full population of the cache.
     func seed() async throws -> SyncReport {
@@ -328,18 +363,26 @@ public actor SyncEngine {
 
         var cursor: String?
         var upserted = 0
+        var pages = 0
         var highestUpdated = lastSynced
 
         phase = .updating(fetched: 0)
 
-        while true {
-            let page = try await client.history(cursor: cursor, since: from, until: nil, filter: nil)
-            guard !page.documents.isEmpty else { break }
+        // Search rather than `/api/history`: same one-request-per-100 cost, but the documents
+        // arrive with their text, so a document added since the last sync is searchable offline
+        // straight away instead of waiting for an enrichment pass to fetch it separately.
+        while pages < Self.maximumWalkPages {
+            var query = HisterQuery.enumeratingAll(limit: Self.pageSize, pageKey: cursor)
+            query.dateFrom = from
+            let results = try await client.search(query)
+            let documents = results.allDocuments
+            guard !documents.isEmpty else { break }
 
-            upserted += try store(page.documents, highestUpdated: &highestUpdated)
+            upserted += try store(documents, highestUpdated: &highestUpdated)
+            pages += 1
             phase = .updating(fetched: upserted)
 
-            guard let next = page.pageKey, !next.isEmpty, next != cursor else { break }
+            guard let next = results.pageKey, !next.isEmpty, next != cursor else { break }
             cursor = next
         }
 
@@ -359,7 +402,12 @@ public actor SyncEngine {
         return report
     }
 
-    /// Writes one page of metadata and tracks the newest timestamp seen.
+    /// Writes one page and tracks the newest timestamp seen.
+    ///
+    /// Pages arrive from two kinds of endpoint. A search page carries text, so its rows get an
+    /// excerpt; a history page carries none, and its rows must leave `excerpt` at nil so they
+    /// read as "not asked yet" rather than "asked, and there is no text" — `upsert` then keeps
+    /// whatever text is already cached instead of blanking it.
     private func store(_ documents: [HisterDocument], highestUpdated: inout Int64) throws -> Int {
         let rows = documents.map { CachedDocument(document: $0, now: now()) }
         try index.upsert(rows)
@@ -385,28 +433,37 @@ public actor SyncEngine {
 
             let results = try await client.batchGet(urls: urls)
 
-            let rows = results.compactMap { result -> CachedDocument? in
-                guard var document = result.document else { return nil }
-                // File the text under the URL that was asked for. The server normalises URLs on
-                // the way in, so the one it returns can differ — and writing that one would leave
-                // the original row still empty while creating a second row nothing points at.
-                document.url = result.requestedURL
+            var rows: [CachedDocument] = []
+            var exhausted: [String] = []
 
-                var row = CachedDocument(document: document, now: now())
-                // An empty excerpt means "asked, and there is no text" — distinct from NULL,
-                // "not asked yet". Without the distinction a text-free document is re-requested
-                // on every sync forever.
-                row.excerpt = row.excerpt ?? ""
-                return row
+            for result in results {
+                if let document = result.document {
+                    rows.append(cacheRow(for: document, requestedURL: result.requestedURL))
+                    continue
+                }
+                // Only a slot the server actually answered for is a candidate for giving up on.
+                // A slot that failed for any other reason — or a whole batch that failed — is not
+                // evidence the document has no text.
+                guard result.isDefinitivelyAbsent else { continue }
+
+                // ...and even a 404 here is not that evidence. `/api/batch` resolves a URL to a
+                // bleve document ID built from the caller's user id, so on an instance whose
+                // documents belong to a real user it 404s every URL an access-token client asks
+                // for. A `url:` search does not use the ID and answers correctly, so it decides.
+                switch await recover(url: result.requestedURL) {
+                case .found(let document):
+                    rows.append(cacheRow(for: document, requestedURL: result.requestedURL))
+                case .absent:
+                    exhausted.append(result.requestedURL)
+                case .failed:
+                    // Unknown, so leave the row alone; the next pass asks again.
+                    break
+                }
             }
-            try index.upsert(rows)
 
-            // Only give up on a URL the server actually answered for. A slot that failed for any
-            // other reason — or a whole batch that failed — is not evidence the document has no
-            // text, and marking it as such is permanent: nothing ever asks again.
-            let exhausted = results
-                .filter { $0.document == nil && $0.isDefinitivelyAbsent }
-                .map(\.requestedURL)
+            try index.upsert(rows)
+            // Marking a URL unavailable is permanent — nothing ever asks again — which is why it
+            // takes two independent answers to get here.
             try index.markExcerptUnavailable(urls: exhausted)
 
             let settled = rows.count + exhausted.count
@@ -417,6 +474,39 @@ public actor SyncEngine {
             guard settled > 0 else { break }
         }
         return enriched
+    }
+
+    /// Builds an enrichment row, filing the text under the URL that was asked for.
+    ///
+    /// The server normalises URLs on the way in — stripping fragments and tracking parameters —
+    /// so the URL it returns is not always the one requested. Writing that one would leave the
+    /// original row still empty and create a second row nothing refers to.
+    private func cacheRow(for document: HisterDocument, requestedURL: String) -> CachedDocument {
+        var document = document
+        document.url = requestedURL
+        var row = CachedDocument(document: document, now: now())
+        // An empty excerpt means "asked, and there is no text" — distinct from NULL, "not asked
+        // yet". Without the distinction a genuinely text-free document is re-requested forever.
+        row.excerpt = row.excerpt ?? ""
+        return row
+    }
+
+    /// What a second opinion on a 404 from `/api/batch` concluded.
+    private enum Recovery {
+        case found(HisterDocument)
+        case absent
+        case failed
+    }
+
+    /// Asks for a document again through a `url:` search, which resolves by query rather than by
+    /// document ID.
+    private func recover(url: String) async -> Recovery {
+        do {
+            guard let document = try await client.documentBySearch(url: url) else { return .absent }
+            return .found(document)
+        } catch {
+            return .failed
+        }
     }
 
     // MARK: - Reconcile
@@ -492,20 +582,56 @@ public actor SyncEngine {
 
     // MARK: - Diagnostics
 
-    /// Reports how many documents each enumeration strategy can actually reach.
+    /// Reports what each enumeration strategy actually reaches, and what the text pipeline does
+    /// with it.
     ///
-    /// The cache has repeatedly settled below the server's own count, and each strategy fails in
-    /// a way that is invisible from the outside — a date-bounded query silently omits documents
-    /// indexed without an `updated` field, and cursor paging runs through an alias over several
-    /// indexes. Comparing the strategies against `/api/stats` says which one is falling short
-    /// instead of leaving it to be inferred.
+    /// Two numbers have been confusing each other. `/api/stats` answers with bleve's match-all
+    /// hit count across an alias of per-language indexes, and the server keeps a document in more
+    /// than one of those when its detected language changes — `getStoredDocumentState` sizes its
+    /// own lookup at "one entry per index" for exactly that reason. So the server's count is
+    /// hits, not documents, and a cache holding every document can still look short by hundreds.
+    /// Reporting raw hits alongside distinct URLs separates "the walk stopped early" from "the
+    /// server counts the same page twice".
     public func diagnose() async -> String {
         var lines: [String] = []
 
         let serverTotal = try? await client.stats().documentCount
-        lines.append("Server reports: \(serverTotal.map(String.init) ?? "unknown")")
+        lines.append("Server reports: \(serverTotal.map(String.init) ?? "unknown") index entries")
         lines.append("Cached locally: \((try? index.documentCount()).map(String.init) ?? "unknown")")
         lines.append("")
+
+        var bySearch = Set<String>()
+        var searchHits = 0
+        var searchRequests = 0
+        var searchWithText = 0
+        var searchTotal: UInt64?
+        do {
+            var cursor: String?
+            var pages = 0
+            while pages < Self.maximumWalkPages {
+                let results = try await client.search(
+                    HisterQuery.enumeratingAll(limit: Self.pageSize, pageKey: cursor)
+                )
+                let documents = results.allDocuments
+                guard !documents.isEmpty else { break }
+                searchRequests += 1
+                pages += 1
+                searchHits += documents.count
+                searchWithText += documents.filter { !($0.text ?? "").isEmpty }.count
+                bySearch.formUnion(documents.map(\.url))
+                searchTotal = searchTotal ?? results.total
+                guard let next = results.pageKey, !next.isEmpty, next != cursor else { break }
+                cursor = next
+            }
+            lines.append("Match-all search: \(bySearch.count) documents in \(searchRequests) requests")
+            lines.append("  raw hits returned: \(searchHits)")
+            lines.append("  hits carrying text: \(searchWithText)")
+            if let searchTotal {
+                lines.append("  total the search reported: \(searchTotal)")
+            }
+        } catch {
+            lines.append("Match-all search failed after \(bySearch.count): \(error.localizedDescription)")
+        }
 
         var byDate = Set<String>()
         var dateRequests = 0
@@ -546,16 +672,25 @@ public actor SyncEngine {
             lines.append("Per-domain pass failed after \(byDomain.count): \(error.localizedDescription)")
         }
 
-        let union = byDate.union(byCursor).union(byDomain)
-        lines.append("Combined: \(union.count)")
-        lines.append("Only the date pass reached: \(byDate.subtracting(byCursor).subtracting(byDomain).count)")
-        lines.append("Only the cursor pass reached: \(byCursor.subtracting(byDate).subtracting(byDomain).count)")
-        lines.append("Only the per-domain pass reached: \(byDomain.subtracting(byDate).subtracting(byCursor).count)")
+        let union = bySearch.union(byDate).union(byCursor).union(byDomain)
+        lines.append("")
+        lines.append("Combined: \(union.count) distinct URLs")
+        lines.append("Only the search pass reached: \(bySearch.subtracting(byDate).subtracting(byCursor).subtracting(byDomain).count)")
+        lines.append("Only the date pass reached: \(byDate.subtracting(bySearch).subtracting(byCursor).subtracting(byDomain).count)")
+        lines.append("Only the cursor pass reached: \(byCursor.subtracting(bySearch).subtracting(byDate).subtracting(byDomain).count)")
+        lines.append("Only the per-domain pass reached: \(byDomain.subtracting(bySearch).subtracting(byDate).subtracting(byCursor).count)")
 
         if let serverTotal, UInt64(union.count) < serverTotal {
             lines.append("")
-            lines.append("Short by \(serverTotal - UInt64(union.count)). Neither strategy reaches these,")
-            lines.append("so they are not visible through /api/history at all.")
+            let gap = serverTotal - UInt64(union.count)
+            if UInt64(searchHits) >= serverTotal {
+                lines.append("\(gap) fewer documents than index entries, and the search returned")
+                lines.append("\(searchHits) hits for \(bySearch.count) URLs — the server is counting the")
+                lines.append("same document once per language index, not hiding \(gap) documents.")
+            } else {
+                lines.append("Short by \(gap), and the walks did not return that many duplicate hits")
+                lines.append("either, so those entries are genuinely out of reach.")
+            }
         }
 
         lines.append("")
@@ -566,7 +701,52 @@ public actor SyncEngine {
         lines.append("Never fetched: \((try? index.countMissingExcerpt()).map(String.init) ?? "unknown")")
         lines.append("Awaiting Spotlight: \((try? index.countNeedingSpotlight()).map(String.init) ?? "unknown")")
 
+        // Probe URLs the walk just proved the server holds, rather than only rows still queued
+        // for text: once a bad pass has written the whole cache off as textless there is nothing
+        // in that queue, which is precisely when this check is worth having.
+        var sample = Array(union.prefix(3))
+        if sample.isEmpty {
+            sample = (try? index.urlsMissingExcerpt(limit: 3)) ?? []
+        }
+        if !sample.isEmpty {
+            lines.append("")
+            lines.append("Text fetch check:")
+            for url in sample {
+                lines.append(await probeText(for: url))
+            }
+        }
+
         return lines.joined(separator: "\n")
+    }
+
+    /// Reports, for one URL, what each of the two text sources answers.
+    ///
+    /// Both paths have failed silently before — batch get by 404ing every URL, search by
+    /// returning documents with an empty `text` — and from the cache alone the two look
+    /// identical. Naming which one answered is the difference between a fixable bug and another
+    /// round of guessing.
+    private func probeText(for url: String) async -> String {
+        var parts: [String] = []
+        do {
+            if let result = try await client.batchGet(urls: [url]).first {
+                let length = result.document?.text?.count ?? 0
+                parts.append("batch \(result.status), \(length) chars")
+            } else {
+                parts.append("batch returned no slot")
+            }
+        } catch {
+            parts.append("batch failed (\(error.localizedDescription))")
+        }
+        do {
+            if let document = try await client.documentBySearch(url: url) {
+                parts.append("search found it, \(document.text?.count ?? 0) chars")
+            } else {
+                parts.append("search found nothing")
+            }
+        } catch {
+            parts.append("search failed (\(error.localizedDescription))")
+        }
+        return "  \(url)\n    \(parts.joined(separator: "; "))"
     }
 
     /// Forces a full re-seed — the "Rebuild cache from scratch" action in Settings.

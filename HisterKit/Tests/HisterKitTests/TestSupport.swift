@@ -58,8 +58,8 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
 
 /// An in-memory `HisterAPI` for exercising the sync engine without a server.
 final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
-    /// History pages keyed by the incoming cursor (`nil` for the first page). Sync enumerates
-    /// through `/api/history`, so this is what drives the sync tests.
+    /// History pages keyed by the incoming cursor (`nil` for the first page), for tests that
+    /// exercise the metadata-only backstop walks directly.
     var historyPages: [String?: HisterHistoryPage] = [:]
     /// Full documents returned by a batch `get`, keyed by URL. A URL absent here comes back as a
     /// per-item 404, exactly as the server reports a document deleted mid-sync.
@@ -84,7 +84,60 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
 
     func search(_ query: HisterQuery) async throws -> HisterResults {
         recordedQueries.append(query)
+        // A match-all query is an enumeration of the whole corpus, which is what sync leads with;
+        // anything else is a user search and comes from the keyed pages.
+        if query.matchAll == true, !corpus.isEmpty {
+            return serveSearchPage(query)
+        }
+        if query.text.hasPrefix("url:") {
+            let url = query.text
+                .dropFirst("url:".count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            guard let document = searchOnlyDocuments[url] ?? storedDocuments[url] else {
+                return HisterResults(total: 0, documents: [])
+            }
+            return HisterResults(total: 1, documents: [document])
+        }
         return searchPages[query.pageKey] ?? HisterResults(total: 0, documents: [])
+    }
+
+    /// Documents a `url:` search can find but a batch `get` cannot, which is how the real server
+    /// behaves when its documents are owned by a user and the client authenticates with a token.
+    var searchOnlyDocuments: [String: HisterDocument] = [:]
+
+    func documentBySearch(url: String) async throws -> HisterDocument? {
+        searchOnlyDocuments[url] ?? storedDocuments[url]
+    }
+
+    /// Serves the corpus the way `/search` does: newest first, `date_from` inclusive, `page_key`
+    /// present only on a full page.
+    private func serveSearchPage(_ query: HisterQuery) -> HisterResults {
+        let matching = corpus
+            .filter { document in
+                guard let from = query.dateFrom, from != 0 else { return true }
+                return (document.updated ?? 0) >= from
+            }
+            .sorted { lhs, rhs in
+                let left = lhs.updated ?? 0
+                let right = rhs.updated ?? 0
+                return left == right ? lhs.url > rhs.url : left > right
+            }
+
+        var start = 0
+        if let cursor = query.pageKey, let position = matching.firstIndex(where: { $0.url == cursor }) {
+            start = position + 1
+        }
+        guard start < matching.count else {
+            return HisterResults(total: UInt64(matching.count), documents: [])
+        }
+
+        let size = query.limit ?? corpusPageSize
+        let page = Array(matching[start..<min(start + size, matching.count)])
+        return HisterResults(
+            total: UInt64(matching.count),
+            documents: page,
+            pageKey: page.count >= size ? page.last?.url : nil
+        )
     }
 
     func suggest(_ prefix: String) async throws -> [String] { [] }
@@ -111,7 +164,7 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     var recordedFilters: [String?] = []
 
     func facets(domainLimit: Int) async throws -> HisterFacets {
-        HisterFacets(terms: ["domain": HisterTermFacet(terms: facetDomains, other: 0)])
+        HisterFacets(terms: [HisterClient.domainFacetName: HisterTermFacet(terms: facetDomains, other: 0)])
     }
 
     func history(

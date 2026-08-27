@@ -3,9 +3,11 @@ import Foundation
 /// Mirrors `indexer.Query`. Sent as the JSON-encoded `query` parameter of `GET /search`, which
 /// exposes every knob the individual query-string parameters do.
 ///
-/// It cannot be used to enumerate the index: `serveSearch` rejects an empty `text` with
-/// `400 {"error":"text query required for format=json"}` before `match_all` is consulted. Cache
-/// sync walks `/api/history` instead.
+/// It *can* enumerate the whole index, which is what makes it the basis of cache sync. The
+/// handler's only objection to a match-all query is a literal one: it rejects an empty `text`
+/// with `400 {"error":"text query required for format=json"}` before looking at anything else.
+/// `matchAllText` satisfies that check and is then ignored, so `HisterQuery.enumeratingAll` walks
+/// every document — with `include_text`, which no other enumeration endpoint offers.
 public struct HisterQuery: Codable, Sendable, Equatable {
     public var text: String
     public var highlight: String?
@@ -24,11 +26,7 @@ public struct HisterQuery: Codable, Sendable, Equatable {
     public var facets: Bool?
     public var facetSizes: [String: Int]?
     public var facetsOnly: Bool?
-    /// Match every document, ignoring `text`.
-    ///
-    /// Only honoured on the WebSocket search path: `serveSearch` rejects an empty `text` with
-    /// 400 before this is ever consulted over HTTP, so cache sync enumerates through
-    /// `/api/history` instead.
+    /// Match every document. `text` is ignored when this is set.
     public var matchAll: Bool?
 
     public init(
@@ -86,6 +84,29 @@ public struct HisterQuery: Codable, Sendable, Equatable {
         case matchAll = "match_all"
     }
 
+    /// Placeholder `text` for a match-all query.
+    ///
+    /// `serveSearch` refuses an empty `text` outright, so a match-all request has to carry
+    /// something. A lone `*` is the right something twice over: the query builder strips
+    /// standalone wildcards and, finding nothing left, builds a match-all query — so this works
+    /// even against a build that predates the `match_all` field.
+    public static let matchAllText = "*"
+
+    /// A query that walks the whole index, newest first, with each document's text.
+    ///
+    /// This is what cache sync pages through. `sort: "date"` orders by `updated` with the
+    /// document ID as tiebreak, which is a total order and therefore safe to page with
+    /// `pageKey` — the server turns it into bleve's `SearchAfter`.
+    public static func enumeratingAll(limit: Int, pageKey: String? = nil) -> HisterQuery {
+        HisterQuery(
+            text: matchAllText,
+            limit: limit,
+            sort: "date",
+            pageKey: pageKey,
+            includeText: true,
+            matchAll: true
+        )
+    }
 }
 
 /// Mirrors `indexer.Results`.
@@ -97,6 +118,9 @@ public struct HisterResults: Codable, Sendable, Equatable {
     public var querySuggestion: String?
     public var semanticEnabled: Bool?
     public var facets: HisterFacets?
+    /// Results the server moved out of `documents` because the user has opened them for this
+    /// query before. See `allDocuments`.
+    public var history: [HisterHistoryHit]
 
     enum CodingKeys: String, CodingKey {
         case total
@@ -106,6 +130,23 @@ public struct HisterResults: Codable, Sendable, Equatable {
         case querySuggestion = "query_suggestion"
         case semanticEnabled = "semantic_enabled"
         case facets
+        case history
+    }
+
+    /// Every document in the response, `history` included.
+    ///
+    /// `doSearch` does not merely annotate a result it recognises from the user's click history —
+    /// it *removes* it from `documents` and re-emits it under `history` instead, carrying the
+    /// text across. Reading only `documents` therefore drops precisely the pages the user visits
+    /// most, which is the opposite of what a cache wants.
+    public var allDocuments: [HisterDocument] {
+        var seen = Set(documents.map(\.url))
+        var combined = documents
+        for hit in history where !hit.url.isEmpty {
+            guard seen.insert(hit.url).inserted else { continue }
+            combined.append(hit.document)
+        }
+        return combined
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,6 +159,8 @@ public struct HisterResults: Codable, Sendable, Equatable {
         querySuggestion = try container.decodeIfPresent(String.self, forKey: .querySuggestion)
         semanticEnabled = try container.decodeIfPresent(Bool.self, forKey: .semanticEnabled)
         facets = try container.decodeIfPresent(HisterFacets.self, forKey: .facets)
+        // `history` is `null` when the server has no click history for the query.
+        history = try container.decodeIfPresent([HisterHistoryHit].self, forKey: .history) ?? []
     }
 
     public init(
@@ -127,7 +170,8 @@ public struct HisterResults: Codable, Sendable, Equatable {
         searchDuration: String? = nil,
         querySuggestion: String? = nil,
         semanticEnabled: Bool? = nil,
-        facets: HisterFacets? = nil
+        facets: HisterFacets? = nil,
+        history: [HisterHistoryHit] = []
     ) {
         self.total = total
         self.documents = documents
@@ -136,6 +180,56 @@ public struct HisterResults: Codable, Sendable, Equatable {
         self.querySuggestion = querySuggestion
         self.semanticEnabled = semanticEnabled
         self.facets = facets
+        self.history = history
+    }
+}
+
+/// One entry of a search response's `history` block (`model.URLCount`).
+///
+/// It is a document the user has opened for this query before. The server fills in `text` from
+/// the search hit it displaced, so these are as good a cache source as `documents` — they just
+/// arrive under a different key.
+public struct HisterHistoryHit: Codable, Sendable, Equatable {
+    public var url: String
+    public var title: String?
+    public var text: String?
+    public var count: UInt?
+    public var pinned: Bool?
+    public var documentID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case title
+        case text
+        case count
+        case pinned
+        case documentID = "id"
+    }
+
+    public init(
+        url: String,
+        title: String? = nil,
+        text: String? = nil,
+        count: UInt? = nil,
+        pinned: Bool? = nil,
+        documentID: String? = nil
+    ) {
+        self.url = url
+        self.title = title
+        self.text = text
+        self.count = count
+        self.pinned = pinned
+        self.documentID = documentID
+    }
+
+    public var document: HisterDocument {
+        HisterDocument(
+            documentID: documentID,
+            url: url,
+            title: title,
+            text: text,
+            addCount: count
+        )
     }
 }
 
@@ -156,14 +250,10 @@ public struct HisterTermCount: Codable, Sendable, Equatable {
 
 /// Response of `GET /api/history` in its default ("indexed documents") mode.
 ///
-/// This is the only endpoint that walks the whole index without a search term, which makes it —
-/// not `/search` — the basis of cache sync. `/search` over HTTP rejects an empty query outright
-/// ("text query required for format=json"); its match-all path exists only behind the WebSocket
-/// upgrade the same handler falls through to.
-///
-/// The documents it returns are metadata only: `url`, `title`, `added`, `updated`, `add_count`
-/// and `favicon_key`. No text, domain, label or language — those come from a follow-up
-/// `POST /api/batch` with `get` operations.
+/// A cheap metadata-only walk of the index, used as a backstop for the match-all `/search` pass
+/// that sync leads with. The documents it returns carry `url`, `title`, `added`, `updated`,
+/// `add_count` and `favicon_key` and nothing else — no text, domain, label or language — because
+/// the handler asks bleve for exactly those fields.
 public struct HisterHistoryPage: Codable, Sendable, Equatable {
     public var documents: [HisterDocument]
     /// Opaque cursor to pass back as the `last` parameter of the next request.

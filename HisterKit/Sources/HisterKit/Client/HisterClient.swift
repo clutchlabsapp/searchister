@@ -15,6 +15,7 @@ public protocol HisterAPI: Sendable {
     func history(cursor: String?, since: Int64?, until: Int64?, filter: String?) async throws -> HisterHistoryPage
     func facets(domainLimit: Int) async throws -> HisterFacets
     func batchGet(urls: [String]) async throws -> [BatchGetResult]
+    func documentBySearch(url: String) async throws -> HisterDocument?
     func stats() async throws -> HisterStats
     func add(_ document: HisterDocument) async throws
     func addPDF(_ document: HisterDocument, pdfData: Data) async throws
@@ -64,9 +65,9 @@ public struct HisterClient: HisterAPI {
 
     public func search(_ query: HisterQuery) async throws -> HisterResults {
         // The `query` parameter takes the full JSON `Query` object, which is the only way to set
-        // `include_text` and the facet options; the individual query-string params do not cover
-        // them. `text` must be non-empty: the handler answers 400 for an empty query rather than
-        // matching everything.
+        // `include_text`, `match_all` and the facet options; the individual query-string params
+        // do not cover them. `text` must be non-empty whatever else the object says — see
+        // `HisterQuery.matchAllText`.
         let encoded = try JSONEncoder().encode(query)
         guard let json = String(data: encoded, encoding: .utf8) else {
             throw HisterError.decodingFailed("query could not be encoded")
@@ -129,15 +130,35 @@ public struct HisterClient: HisterAPI {
         }
     }
 
-    /// Facet counts over the whole index.
+    /// Facet counts over the whole index, which is how the domain list is enumerated.
     ///
-    /// `/api/facets` accepts an empty query, unlike `/search`, so this enumerates the index's
-    /// domains without needing a search term — which is what makes a per-domain walk possible.
+    /// Two names have to be exactly right here, and both were wrong before. The query is `*`, not
+    /// empty: `serveGetFacets` passes `q` straight to the query builder, which turns an empty
+    /// string into *match none* and answers `{}`. And the facet is called `domains`, plural —
+    /// `size_domain` is silently dropped by the `searchschema.Facet` lookup, and
+    /// `terms["domain"]` never matches the key the server sends back.
     public func facets(domainLimit: Int = 10_000) async throws -> HisterFacets {
         try await decode(builder.get("/api/facets", query: [
-            URLQueryItem(name: "q", value: ""),
-            URLQueryItem(name: "size_domain", value: String(domainLimit)),
+            URLQueryItem(name: "q", value: HisterQuery.matchAllText),
+            URLQueryItem(name: "size_domains", value: String(domainLimit)),
         ]))
+    }
+
+    /// The name of the term facet listing domains, as the server spells it.
+    public static let domainFacetName = "domains"
+
+    /// Fetches one document, with its text, without going through a document-ID lookup.
+    ///
+    /// `/api/batch` and `/api/document` both resolve a URL through `GetByURLAndUser`, which
+    /// builds a bleve document ID from the *caller's* user id. A token-authenticated request is
+    /// user 0, so on an instance whose documents are owned by a real user every one of those
+    /// lookups answers 404 — for documents the same instance will happily return from a search.
+    /// A `url:` search goes through the query builder instead of the ID, so it is unaffected.
+    public func documentBySearch(url: String) async throws -> HisterDocument? {
+        var query = HisterQuery(text: "url:\"\(url)\"", limit: 5)
+        query.includeText = true
+        let results = try await search(query)
+        return results.allDocuments.first { $0.url == url } ?? results.allDocuments.first
     }
 
     /// Fetches complete documents — text included — for up to 100 URLs in one request.

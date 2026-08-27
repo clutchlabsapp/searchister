@@ -8,22 +8,123 @@ struct SyncEngineTests {
         HisterHistoryPage(documents: documents, pageKey: next)
     }
 
-    /// Sync must go through `/api/history`, never `/search`: `/search` answers
-    /// `400 {"error":"text query required for format=json"}` for the empty query an
-    /// enumeration needs, which is the bug this design exists to avoid.
-    @Test("sync never calls the search endpoint")
-    func neverSearches() async throws {
+    /// Sync leads with a match-all `/search`, which is the only enumeration that carries text.
+    /// The literal detail that makes it work: the handler rejects an empty `text` before it looks
+    /// at `match_all`, so the query has to carry the wildcard placeholder.
+    @Test("sync enumerates with a match-all search that asks for text")
+    func enumeratesWithMatchAllSearch() async throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
 
         let api = FakeHisterAPI()
-        api.historyWindows = [nil: page([makeDocument(url: "https://example.com/1")])]
+        api.corpus = [makeDocument(url: "https://example.com/1", text: "body")]
 
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.sync()
 
-        #expect(api.recordedQueries.isEmpty)
-        #expect(!api.recordedHistoryCursors.isEmpty)
+        let first = try #require(api.recordedQueries.first)
+        #expect(first.matchAll == true)
+        #expect(first.includeText == true)
+        #expect(first.text == HisterQuery.matchAllText)
+        #expect(!first.text.isEmpty)
+    }
+
+    /// The whole reason to enumerate through `/search`: the documents arrive with their body, so
+    /// a first sync leaves the cache searchable by content without a single batch request.
+    @Test("a seed caches body text without any batch requests")
+    func seedCachesTextDirectly() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<5).map {
+            makeDocument(url: "https://example.com/\($0)", text: "Pascal wrote about \($0)", updated: Int64(1_000 + $0))
+        }
+        api.statsCount = 5
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.countWithText() == 5)
+        #expect(api.recordedBatchURLs.isEmpty)
+
+        let (hits, _) = try index.search("pascal")
+        #expect(hits.count == 5)
+    }
+
+    /// `/api/batch` resolves a URL to a document ID built from the caller's user id, so it 404s
+    /// every URL when the documents belong to a real user and the client authenticates with a
+    /// token. A 404 there is therefore not evidence the document has no text — a `url:` search,
+    /// which never touches the ID, gets the final word.
+    @Test("a batch 404 is checked against a search before the text is written off")
+    func batch404IsCheckedAgainstSearch() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let url = "https://example.com/1"
+        try index.upsert([CachedDocument(document: makeDocument(url: url))])
+
+        let api = FakeHisterAPI()
+        // Nothing in storedDocuments, so the batch answers 404 — but a search finds it.
+        api.searchOnlyDocuments = [url: makeDocument(url: url, text: "Pascal appears here.")]
+
+        let engine = SyncEngine(client: api, index: index)
+        #expect(try await engine.enrich(budget: 10) == 1)
+        #expect(try index.document(url: url)?.excerpt == "Pascal appears here.")
+
+        let (hits, _) = try index.search("pascal")
+        #expect(hits.map(\.document.url) == [url])
+    }
+
+    /// A cache in which not one document has text is a failed enrichment pass, not an index of
+    /// text-free pages, and the "no text" marker is permanent — so this one state has to reset
+    /// itself or the cache never recovers.
+    @Test("a cache where nothing has text requeues itself")
+    func whollyTextlessCacheRequeues() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let urls = (0..<3).map { "https://example.com/\($0)" }
+        try index.upsert(urls.map { CachedDocument(document: makeDocument(url: $0)) })
+        try index.markExcerptUnavailable(urls: urls)
+        try index.setSyncValue("1", for: .seedComplete)
+        try index.setSyncValue(String(Int64(Date().timeIntervalSince1970)), for: .lastReconcileAt)
+
+        let api = FakeHisterAPI()
+        api.statsCount = 3
+        api.storedDocuments = Dictionary(
+            uniqueKeysWithValues: urls.map { ($0, makeDocument(url: $0, text: "recovered body")) }
+        )
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.countWithText() == 3)
+    }
+
+    /// ...but a cache where some documents legitimately have no text is left alone, or every sync
+    /// would re-request them forever.
+    @Test("a partly textless cache is not requeued")
+    func partlyTextlessCacheIsLeftAlone() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert([
+            CachedDocument(document: makeDocument(url: "https://example.com/a", text: "has text")),
+            CachedDocument(document: makeDocument(url: "https://example.com/b")),
+        ])
+        try index.markExcerptUnavailable(urls: ["https://example.com/b"])
+        try index.setSyncValue("1", for: .seedComplete)
+        try index.setSyncValue(String(Int64(Date().timeIntervalSince1970)), for: .lastReconcileAt)
+
+        let api = FakeHisterAPI()
+        api.statsCount = 2
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.countWithoutText() == 1)
+        #expect(api.recordedBatchURLs.isEmpty)
     }
 
     @Test("seed follows the history cursor until the pages run out")
@@ -99,7 +200,7 @@ struct SyncEngineTests {
         let engine = SyncEngine(client: api, index: index)
         _ = try await engine.sync()
 
-        #expect(api.recordedHistorySince.first == 1_000_000 - SyncEngine.incrementalOverlap)
+        #expect(api.recordedQueries.first?.dateFrom == 1_000_000 - SyncEngine.incrementalOverlap)
     }
 
     /// The bug this guards: `date_to` is exclusive, so a walk that sets the next bound to the
