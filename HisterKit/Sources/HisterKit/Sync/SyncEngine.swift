@@ -146,13 +146,81 @@ public actor SyncEngine {
     private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
         try await walkByDateWindows(onPage: onPage)
         try await walkByCursor(onPage: onPage)
+        try await walkByDomain(onPage: onPage)
     }
+
+    /// Walks the index one domain at a time.
+    ///
+    /// The other two passes both stall around a thousand documents on a larger index, and between
+    /// them they reach the same set — so neither is merely a slower version of the other, and
+    /// something they share is the limit. Both list the whole index in one ordering and page
+    /// through it, either by date or by cursor.
+    ///
+    /// This pass never pages. `/api/facets` accepts an empty query, so it yields every domain in
+    /// the index, and `/api/history` accepts a `filter` matched against the URL. Most domains
+    /// hold far fewer than one page of documents, so each is a single unpaged request — no sort
+    /// to page through, no date bound to exclude documents indexed without an `updated` field.
+    /// The handful of domains that do exceed a page fall back to date windows within the filter.
+    private func walkByDomain(onPage: ([HisterDocument]) throws -> Int) async throws {
+        let facets = try await client.facets(domainLimit: Self.domainFacetLimit)
+        guard let domains = facets.terms?["domain"]?.terms, !domains.isEmpty else { return }
+
+        for (offset, domain) in domains.enumerated() where !domain.term.isEmpty {
+            phase = .reconciling(checked: offset)
+
+            let page = try await client.history(
+                cursor: nil,
+                since: nil,
+                until: nil,
+                filter: domain.term
+            )
+            guard !page.documents.isEmpty else { continue }
+            _ = try onPage(page.documents)
+
+            // Only a domain with more than a page of documents needs paging at all.
+            if page.documents.count >= Self.pageSize {
+                try await drainFilteredDomain(domain.term, onPage: onPage)
+            }
+        }
+    }
+
+    /// Pages a single domain by date window, for the few that hold more than one page.
+    private func drainFilteredDomain(
+        _ domain: String,
+        onPage: ([HisterDocument]) throws -> Int
+    ) async throws {
+        var upperBound: Int64?
+        var pages = 0
+
+        while pages < Self.maximumDomainPages {
+            let page = try await client.history(
+                cursor: nil,
+                since: nil,
+                until: upperBound,
+                filter: domain
+            )
+            guard !page.documents.isEmpty else { return }
+            _ = try onPage(page.documents)
+            pages += 1
+
+            guard let oldest = page.documents.compactMap(\.updated).min() else { return }
+            let next = oldest + 1
+            guard next != upperBound else { return }
+            upperBound = next
+        }
+    }
+
+    /// Facet term cap. High enough to list every domain in a personal index in one request.
+    static let domainFacetLimit = 10_000
+
+    /// Bound on paging within one domain, so a pathological domain cannot stall the whole walk.
+    static let maximumDomainPages = 50
 
     private func walkByDateWindows(onPage: ([HisterDocument]) throws -> Int) async throws {
         var upperBound: Int64?
 
         while true {
-            let page = try await client.history(cursor: nil, since: nil, until: upperBound)
+            let page = try await client.history(cursor: nil, since: nil, until: upperBound, filter: nil)
             guard !page.documents.isEmpty else { break }
 
             _ = try onPage(page.documents)
@@ -178,7 +246,7 @@ public actor SyncEngine {
         var stalledPages = 0
 
         while true {
-            let page = try await client.history(cursor: cursor, since: nil, until: nil)
+            let page = try await client.history(cursor: cursor, since: nil, until: nil, filter: nil)
             guard !page.documents.isEmpty else { return }
 
             let added = try onPage(page.documents)
@@ -204,7 +272,8 @@ public actor SyncEngine {
             let page = try await client.history(
                 cursor: cursor,
                 since: timestamp,
-                until: timestamp + 1
+                until: timestamp + 1,
+                filter: nil
             )
             guard !page.documents.isEmpty else { return }
 
@@ -264,7 +333,7 @@ public actor SyncEngine {
         phase = .updating(fetched: 0)
 
         while true {
-            let page = try await client.history(cursor: cursor, since: from, until: nil)
+            let page = try await client.history(cursor: cursor, since: from, until: nil, filter: nil)
             guard !page.documents.isEmpty else { break }
 
             upserted += try store(page.documents, highestUpdated: &highestUpdated)
@@ -450,10 +519,24 @@ public actor SyncEngine {
             lines.append("Unbounded cursor pass failed after \(byCursor.count): \(error.localizedDescription)")
         }
 
-        let union = byDate.union(byCursor)
+        var byDomain = Set<String>()
+        var domainRequests = 0
+        do {
+            try await walkByDomain { documents in
+                domainRequests += 1
+                byDomain.formUnion(documents.map(\.url))
+                return documents.count
+            }
+            lines.append("Per-domain pass: \(byDomain.count) documents in \(domainRequests) requests")
+        } catch {
+            lines.append("Per-domain pass failed after \(byDomain.count): \(error.localizedDescription)")
+        }
+
+        let union = byDate.union(byCursor).union(byDomain)
         lines.append("Combined: \(union.count)")
-        lines.append("Only the date pass reached: \(byDate.subtracting(byCursor).count)")
-        lines.append("Only the cursor pass reached: \(byCursor.subtracting(byDate).count)")
+        lines.append("Only the date pass reached: \(byDate.subtracting(byCursor).subtracting(byDomain).count)")
+        lines.append("Only the cursor pass reached: \(byCursor.subtracting(byDate).subtracting(byDomain).count)")
+        lines.append("Only the per-domain pass reached: \(byDomain.subtracting(byDate).subtracting(byCursor).count)")
 
         if let serverTotal, UInt64(union.count) < serverTotal {
             lines.append("")

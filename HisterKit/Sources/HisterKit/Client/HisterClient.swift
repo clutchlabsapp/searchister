@@ -12,7 +12,8 @@ public protocol HisterAPI: Sendable {
     func suggest(_ prefix: String) async throws -> [String]
     func document(url: String) async throws -> HisterDocument
     func preview(url: String, extractor: String?) async throws -> String
-    func history(cursor: String?, since: Int64?, until: Int64?) async throws -> HisterHistoryPage
+    func history(cursor: String?, since: Int64?, until: Int64?, filter: String?) async throws -> HisterHistoryPage
+    func facets(domainLimit: Int) async throws -> HisterFacets
     func batchGet(urls: [String]) async throws -> [HisterDocument]
     func stats() async throws -> HisterStats
     func add(_ document: HisterDocument) async throws
@@ -58,7 +59,7 @@ public struct HisterClient: HisterAPI {
     /// also the first call sync makes, which is the property that matters: if this succeeds,
     /// syncing will not fail on authentication.
     public func verifyAccess() async throws {
-        _ = try await history(cursor: nil, since: nil, until: nil)
+        _ = try await history(cursor: nil, since: nil, until: nil, filter: nil)
     }
 
     public func search(_ query: HisterQuery) async throws -> HisterResults {
@@ -106,12 +107,14 @@ public struct HisterClient: HisterAPI {
     public func history(
         cursor: String? = nil,
         since: Int64? = nil,
-        until: Int64? = nil
+        until: Int64? = nil,
+        filter: String? = nil
     ) async throws -> HisterHistoryPage {
         var items: [URLQueryItem] = []
         if let cursor { items.append(URLQueryItem(name: "last", value: cursor)) }
         if let since { items.append(URLQueryItem(name: "date_from", value: String(since))) }
         if let until { items.append(URLQueryItem(name: "date_to", value: String(until))) }
+        if let filter, !filter.isEmpty { items.append(URLQueryItem(name: "filter", value: filter)) }
 
         let data = try await perform(builder.get("/api/history", query: items))
         // The handler returns a bare `null` — not an empty object — once the pages run out.
@@ -124,6 +127,17 @@ public struct HisterClient: HisterAPI {
         } catch {
             throw HisterError.decodingFailed(String(describing: error))
         }
+    }
+
+    /// Facet counts over the whole index.
+    ///
+    /// `/api/facets` accepts an empty query, unlike `/search`, so this enumerates the index's
+    /// domains without needing a search term — which is what makes a per-domain walk possible.
+    public func facets(domainLimit: Int = 10_000) async throws -> HisterFacets {
+        try await decode(builder.get("/api/facets", query: [
+            URLQueryItem(name: "q", value: ""),
+            URLQueryItem(name: "size_domain", value: String(domainLimit)),
+        ]))
     }
 
     /// Fetches complete documents — text included — for up to 100 URLs in one request.

@@ -223,6 +223,38 @@ struct SyncEngineTests {
         #expect(try index.documentCount() == 200)
     }
 
+    /// The third strategy. On a real index both list-the-whole-thing passes stalled at roughly a
+    /// thousand documents and reached the same set, so the limit is in what they share: paging
+    /// through one global ordering. A per-domain walk asks for small sets that never page.
+    @Test("the per-domain pass asks for each domain and reaches documents the others miss")
+    func perDomainPassCoversEverything() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<60).map { index -> HisterDocument in
+            var document = makeDocument(url: "https://alpha.example/\(index)")
+            // Undated, so no date-bounded request can see them.
+            document.updated = nil
+            return document
+        }
+        api.corpus += (0..<40).map {
+            makeDocument(url: "https://beta.example/\($0)", updated: Int64(1_000 + $0))
+        }
+        api.facetDomains = [
+            HisterTermCount(term: "alpha.example", count: 60),
+            HisterTermCount(term: "beta.example", count: 40),
+        ]
+        api.statsCount = 100
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.seed()
+
+        #expect(api.recordedFilters.contains("alpha.example"))
+        #expect(api.recordedFilters.contains("beta.example"))
+        #expect(try index.documentCount() == 100)
+    }
+
     // MARK: - Enrichment
 
     /// `/api/history` returns no text, so a seeded row starts with no excerpt and the batch pass

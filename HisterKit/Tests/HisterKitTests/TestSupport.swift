@@ -107,19 +107,44 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     /// Server-side page size. `/api/history` hard-codes 100.
     var corpusPageSize = 100
 
-    func history(cursor: String?, since: Int64?, until: Int64?) async throws -> HisterHistoryPage {
+    var facetDomains: [HisterTermCount] = []
+    var recordedFilters: [String?] = []
+
+    func facets(domainLimit: Int) async throws -> HisterFacets {
+        HisterFacets(terms: ["domain": HisterTermFacet(terms: facetDomains, other: 0)])
+    }
+
+    func history(
+        cursor: String?,
+        since: Int64?,
+        until: Int64?,
+        filter: String?
+    ) async throws -> HisterHistoryPage {
+        recordedFilters.append(filter)
         recordedHistoryCursors.append(cursor)
         recordedHistorySince.append(since)
         recordedHistoryUntil.append(until)
 
-        guard corpus.isEmpty else { return servePage(cursor: cursor, since: since, until: until) }
+        guard corpus.isEmpty else {
+            return servePage(cursor: cursor, since: since, until: until, filter: filter)
+        }
         if let page = historyWindows[until], cursor == nil { return page }
         return historyPages[cursor] ?? HisterHistoryPage(documents: [])
     }
 
-    private func servePage(cursor: String?, since: Int64?, until: Int64?) -> HisterHistoryPage {
+    private func servePage(
+        cursor: String?,
+        since: Int64?,
+        until: Int64?,
+        filter: String?
+    ) -> HisterHistoryPage {
         let matching = corpus
             .filter { document in
+                // The server matches `filter` as a case-insensitive substring of the URL.
+                if let filter, !filter.isEmpty,
+                   document.url.range(of: filter, options: .caseInsensitive) == nil {
+                    return false
+                }
                 let isBounded = since != nil || until != nil
                 guard let updated = document.updated else {
                     // A numeric range query matches only documents that *have* the field, so a

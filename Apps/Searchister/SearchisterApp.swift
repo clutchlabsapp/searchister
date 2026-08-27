@@ -13,15 +13,30 @@ struct SearchisterApp: App {
 
     @State private var model = SearchModel()
 
+    /// A Spotlight result is the page itself, so it opens where pages open — the browser.
+    ///
+    /// The exception is a document indexed from a local file: `remote-file://` is Hister's own
+    /// scheme for those, and handing it to the system would only fail, so those open here.
+    private func openFromSpotlight(_ identifier: String) {
+        guard let url = URL(string: identifier), url.scheme != "remote-file" else {
+            model.openDocument(url: identifier)
+            return
+        }
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #else
+        UIApplication.shared.open(url)
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(model)
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
-                    // Tapping a Spotlight result opens the document in the app.
-                    guard let url = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String
+                    guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String
                     else { return }
-                    model.openDocument(url: url)
+                    openFromSpotlight(identifier)
                 }
                 .onContinueUserActivity(CSQueryContinuationActionType) { activity in
                     // "Search all of Hister for …" from the Spotlight result group.
