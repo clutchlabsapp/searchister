@@ -14,6 +14,12 @@ build/
 .build/
 .swiftpm/
 
+# Sources copied in by Scripts/linux-check.sh. Only the package manifest and the stubs are
+# committed; everything else there is a copy of HisterKit and is rewritten on every run.
+Scripts/LinuxCheck/Sources/
+Scripts/LinuxCheck/Tests/
+Scripts/LinuxCheck/Package.resolved
+
 # macOS
 .DS_Store
 

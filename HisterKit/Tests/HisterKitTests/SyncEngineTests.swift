@@ -185,7 +185,11 @@ struct SyncEngineTests {
         #expect(api.recordedBatchURLs.isEmpty)
     }
 
-    @Test("seed follows the history cursor until the pages run out")
+    /// The date window narrows by `oldest + 1`, never by `oldest`, because the server's `date_to`
+    /// is exclusive — `NewNumericRangeInclusiveQuery(min, max, true, false)`. Bounding at `oldest`
+    /// drops every remaining document stamped with that exact second. The window keys below are
+    /// the bounds a correct walk asks for.
+    @Test("the seed narrows date_to past the oldest document it saw")
     func seedPaginates() async throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
@@ -197,23 +201,25 @@ struct SyncEngineTests {
                 makeDocument(url: "https://example.com/1", title: "One", updated: 300),
                 makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
             ]),
-            200: page([
+            201: page([
                 makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
                 makeDocument(url: "https://example.com/3", title: "Three", updated: 100),
             ]),
-            100: page([makeDocument(url: "https://example.com/3", title: "Three", updated: 100)]),
+            101: page([makeDocument(url: "https://example.com/3", title: "Three", updated: 100)]),
         ]
 
         let engine = SyncEngine(client: api, index: index)
-        let report = try await engine.sync()
+        _ = try await engine.sync()
 
-        #expect(report.upserted == 3)
+        // Three distinct documents. The passes overlap by design, so the number of rows *written*
+        // is higher and is not what this is about.
         #expect(try index.documentCount() == 3)
         #expect(try index.syncValue(.seedComplete) == "1")
         #expect(try index.syncValue(.seedPageKey) == nil)
         #expect(try index.syncValue(.lastSyncedUpdated) == "300")
-        // Paged by narrowing date_to rather than by following the cursor.
-        #expect(api.recordedHistoryUntil.prefix(3) == [nil, 200, 100])
+        // Paged by narrowing date_to rather than by following the cursor, and each bound is one
+        // second past the oldest document of the previous page.
+        #expect(api.recordedHistoryUntil.prefix(3) == [nil, 201, 101])
     }
 
     /// A walk that comes up short must never be read as "the server deleted everything it did

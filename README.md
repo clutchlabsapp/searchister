@@ -143,6 +143,24 @@ top of Settings.
 New labels are lowercased as they are created. Labels already on the server keep the case they were
 given; rewriting those is the user's call, not a side effect of opening a document.
 
+## Checking changes without a Mac
+
+`Scripts/linux-check.sh` compiles and tests the portable part of `HisterKit` against a Linux Swift
+toolchain — the client, the local index, sync and search, which is where nearly all the logic is.
+Six files cannot build there (`KeychainStore` needs Security, `SpotlightIndexer` CoreSpotlight,
+`DocumentExtractor` UIKit, `PageFetcher` the CoreFoundation charset APIs, `OutboxUploader` a
+background `URLSession`, and `IngestService` depends on those); `KeychainStore` and `AppGroup` are
+replaced by stubs with identical signatures so everything downstream still typechecks against the
+API it meets on a Mac.
+
+```sh
+Scripts/linux-check.sh test    # or: build
+```
+
+Sources are copied into `Scripts/LinuxCheck` and patched there — `URLRequest` and `XMLParser` live
+in separate modules on Linux — so the committed sources keep Apple-shaped imports. It is a fast
+correctness check, not a substitute for building the app: nothing in `Apps/` is checkable this way.
+
 ## What the offline cache holds
 
 Document metadata plus roughly the first 1,500 characters of each document's text, in a SQLite
