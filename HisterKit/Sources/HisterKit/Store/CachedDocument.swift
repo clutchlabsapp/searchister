@@ -90,21 +90,36 @@ public struct CachedDocument: Codable, Sendable, Equatable, Identifiable,
 
     /// Builds a cache row from a server document, deriving the excerpt and the domain when the
     /// server did not send one.
+    ///
+    /// Every empty string is read as "the server did not send this", never as "the server sent
+    /// an empty value". That is not a nicety: `document.Document` declares its string fields
+    /// without `omitempty`, so *every* response marshals `"text": ""`, `"domain": ""` and
+    /// `"label": ""` — including `/api/history`, which populates only url, title and the
+    /// timestamps. Taking those at face value meant each metadata walk overwrote the text,
+    /// domain and labels the search pass had just cached with nothing, and the whole index ended
+    /// up recorded as having no body text. `upsert` completes the other half of this rule by
+    /// keeping what it already holds wherever a field arrives nil.
     public init(document: HisterDocument, now: Date = Date()) {
         self.init(
             url: document.url,
-            title: document.title,
-            domain: document.domain ?? URL(string: document.url)?.host(),
-            label: document.label,
-            language: document.language,
+            title: Self.present(document.title),
+            domain: Self.present(document.domain) ?? URL(string: document.url)?.host(),
+            label: Self.present(document.label),
+            language: Self.present(document.language),
             type: document.type?.rawValue,
             added: document.added,
             updated: document.updated,
-            faviconKey: document.faviconKey,
-            excerpt: document.text.map { Excerpt.make(from: $0) },
+            faviconKey: Self.present(document.faviconKey),
+            excerpt: Self.present(document.text).map { Excerpt.make(from: $0) },
             fullText: nil,
             syncedAt: Int64(now.timeIntervalSince1970)
         )
+    }
+
+    /// nil for a value the server did not actually supply, empty strings included.
+    static func present(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 }
 

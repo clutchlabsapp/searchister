@@ -69,6 +69,11 @@ public actor SyncEngine {
     /// in reasonable time and the rest fills in on later passes.
     public static let enrichmentBudget = 2_000
 
+    /// The same ceiling for an incremental pass, which is what every app launch runs. Low enough
+    /// that opening the window is not a minute of syncing; a backlog still drains a few hundred
+    /// documents per launch, and a full check from Settings clears it in one go.
+    public static let incrementalEnrichmentBudget = 300
+
     /// How far back an incremental pass reaches beyond the last synced timestamp. Absorbs clock
     /// skew between device and server; re-fetching a handful of documents is free.
     public static let incrementalOverlap: Int64 = 300
@@ -114,7 +119,8 @@ public actor SyncEngine {
                 // Nothing cached yet, so there is no cheap pass to take.
                 report = try await seed()
             }
-            report.enriched = try await enrich(budget: Self.enrichmentBudget)
+            let budget = scope == .fullCheck ? Self.enrichmentBudget : Self.incrementalEnrichmentBudget
+            report.enriched = try await enrich(budget: budget)
             phase = .finished(now())
             return report
         } catch {
@@ -211,6 +217,13 @@ public actor SyncEngine {
         for (offset, domain) in domains.enumerated() where !domain.term.isEmpty {
             phase = .reconciling(checked: offset)
 
+            // Search first, because it returns the documents' text; `/api/history` returns
+            // metadata only and would leave this pass's documents needing a separate enrichment
+            // request each. This pass reaches documents the others do not, so on a large index
+            // that is the difference between most of the cache having body text and most of it
+            // not.
+            if try await walkDomainBySearch(domain.term, onPage: onPage) { continue }
+
             let page = try await client.history(
                 cursor: nil,
                 since: nil,
@@ -225,6 +238,40 @@ public actor SyncEngine {
                 try await drainFilteredDomain(domain.term, onPage: onPage)
             }
         }
+    }
+
+    /// Pages one domain through `/search`, text included.
+    ///
+    /// - Returns: whether the search reached anything. `false` means the caller should fall back
+    ///   to the `filter`ed history feed — the search DSL matches `domain` as a keyword field, and
+    ///   a term the facet reports is not guaranteed to be spelled the way the query builder wants
+    ///   it, so a domain that comes back empty is treated as a miss rather than as an empty
+    ///   domain.
+    private func walkDomainBySearch(
+        _ domain: String,
+        onPage: ([HisterDocument]) throws -> Int
+    ) async throws -> Bool {
+        var cursor: String?
+        var pages = 0
+        var reached = 0
+
+        while pages < Self.maximumWalkPages {
+            var query = HisterQuery.enumeratingAll(limit: Self.pageSize, pageKey: cursor)
+            query.matchAll = false
+            query.text = "domain:\"\(domain)\""
+
+            let results = try await client.search(query)
+            let documents = results.allDocuments
+            guard !documents.isEmpty else { break }
+
+            _ = try onPage(documents)
+            reached += documents.count
+            pages += 1
+
+            guard let next = results.pageKey, !next.isEmpty, next != cursor else { break }
+            cursor = next
+        }
+        return reached > 0
     }
 
     /// Pages a single domain by date window, for the few that hold more than one page.
@@ -439,6 +486,13 @@ public actor SyncEngine {
             for result in results {
                 if let document = result.document {
                     rows.append(cacheRow(for: document, requestedURL: result.requestedURL))
+                    // The server answered in full and the document has no body. That is the one
+                    // honest source of "no text", and it is recorded separately rather than by
+                    // writing an empty excerpt through `upsert` — which now, correctly, refuses
+                    // to let an empty value overwrite anything.
+                    if CachedDocument.present(document.text) == nil {
+                        exhausted.append(result.requestedURL)
+                    }
                     continue
                 }
                 // Only a slot the server actually answered for is a candidate for giving up on.
@@ -453,6 +507,9 @@ public actor SyncEngine {
                 switch await recover(url: result.requestedURL) {
                 case .found(let document):
                     rows.append(cacheRow(for: document, requestedURL: result.requestedURL))
+                    if CachedDocument.present(document.text) == nil {
+                        exhausted.append(result.requestedURL)
+                    }
                 case .absent:
                     exhausted.append(result.requestedURL)
                 case .failed:
@@ -462,11 +519,14 @@ public actor SyncEngine {
             }
 
             try index.upsert(rows)
-            // Marking a URL unavailable is permanent — nothing ever asks again — which is why it
-            // takes two independent answers to get here.
+            // After the upsert, so a row written with no excerpt is the one this marks. Marking
+            // is permanent — nothing ever asks again — so it happens only on a full answer from
+            // the server about that specific document, never on a failure.
             try index.markExcerptUnavailable(urls: exhausted)
 
-            let settled = rows.count + exhausted.count
+            // A document the server returned with no body appears in both lists — it was written
+            // *and* marked — so count the URLs, not the entries.
+            let settled = Set(rows.map(\.url)).union(exhausted).count
             enriched += settled
             remaining = max(0, remaining - settled)
 
@@ -484,11 +544,7 @@ public actor SyncEngine {
     private func cacheRow(for document: HisterDocument, requestedURL: String) -> CachedDocument {
         var document = document
         document.url = requestedURL
-        var row = CachedDocument(document: document, now: now())
-        // An empty excerpt means "asked, and there is no text" — distinct from NULL, "not asked
-        // yet". Without the distinction a genuinely text-free document is re-requested forever.
-        row.excerpt = row.excerpt ?? ""
-        return row
+        return CachedDocument(document: document, now: now())
     }
 
     /// What a second opinion on a 404 from `/api/batch` concluded.

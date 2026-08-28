@@ -52,6 +52,64 @@ struct SyncEngineTests {
         #expect(hits.count == 5)
     }
 
+    /// The fault that left a fully enumerated cache recorded as having no text at all.
+    /// `document.Document` has no `omitempty`, so `/api/history` sends `"text": ""`,
+    /// `"domain": ""` and `"label": ""` for every document even though it populates none of
+    /// them — and each metadata walk overwrote what the search pass had just cached with those
+    /// empty values.
+    @Test("a metadata walk does not blank the text, domain or labels a search pass cached")
+    func metadataWalksDoNotBlankSearchResults() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<3).map { i in
+            var document = makeDocument(
+                url: "https://example.com/\(i)",
+                text: "Pascal wrote about \(i)",
+                domain: "example.com",
+                label: "reading",
+                updated: Int64(1_000 + i)
+            )
+            document.language = "en"
+            return document
+        }
+        api.statsCount = 3
+        api.facetDomains = [HisterTermCount(term: "example.com", count: 3)]
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.countWithText() == 3)
+        #expect(try index.countWithoutText() == 0)
+
+        let row = try #require(try index.document(url: "https://example.com/0"))
+        #expect(row.excerpt == "Pascal wrote about 0")
+        #expect(row.domain == "example.com")
+        #expect(row.label == "reading")
+        #expect(row.language == "en")
+
+        let (hits, _) = try index.search("pascal")
+        #expect(hits.count == 3)
+    }
+
+    /// Clearing a label has to still work: the rule that an empty value means "not supplied"
+    /// applies to documents coming back from the server, not to a row the app writes itself.
+    @Test("clearing a label locally is not undone by the preserve rule")
+    func clearingALabelSticks() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let url = "https://example.com/1"
+        try index.upsert([CachedDocument(document: makeDocument(url: url, label: "reading"))])
+
+        var row = try #require(try index.document(url: url))
+        row.label = ""
+        try index.upsert([row])
+
+        #expect(try index.document(url: url)?.label == "")
+    }
+
     /// `/api/batch` resolves a URL to a document ID built from the caller's user id, so it 404s
     /// every URL when the documents belong to a real user and the client authenticates with a
     /// token. A 404 there is therefore not evidence the document has no text — a `url:` search,

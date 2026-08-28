@@ -111,6 +111,12 @@ Details worth knowing if you touch this code:
   real user *every* such lookup answers 404 — for documents the same instance returns happily from
   a search. So a 404 from a batch `get` is checked against a `url:` search before the document is
   recorded as having no text.
+- **Every string field comes back as `""` rather than being omitted.** `document.Document`
+  declares them without `omitempty`, so `/api/history` — which populates only url, title and the
+  timestamps — still sends `"text": ""`, `"domain": ""` and `"label": ""`. Read at face value,
+  each metadata walk overwrites what the search pass cached, and a fully enumerated index ends up
+  recorded as having no body text. An empty string from the server means "not supplied": `upsert`
+  keeps what it already holds wherever a field arrives empty.
 - **A search response's `history` block holds real results.** `doSearch` does not annotate a hit
   the user has opened for that query before; it moves it out of `documents` and re-emits it under
   `history`. Read only `documents` and you drop exactly the pages the user returns to most.

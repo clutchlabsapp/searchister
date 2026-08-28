@@ -27,15 +27,22 @@ final class SearchModel {
     private var isSyncing = false
 
     /// First thing the window does. Shows whatever is already cached, then — if the app is
-    /// configured — syncs, so a freshly installed or freshly configured app fills itself in
-    /// without the user having to find a button.
+    /// configured — pulls in anything new, so a freshly installed or freshly configured app fills
+    /// itself in without the user having to find a button.
+    ///
+    /// Deliberately *not* a full check. A full check re-reads the whole index through four
+    /// different walks, one of which asks per domain — on a personal index that is well over a
+    /// thousand requests, which is minutes of the window sitting there syncing every single time
+    /// it opens. New documents are one or two requests. The full check stays available in
+    /// Settings, and the first sync of an unseeded cache is a seed regardless of what is asked
+    /// for here.
     func startup() async {
         refreshCounts()
         if hits.isEmpty, query.isEmpty {
             showRecent()
         }
         guard AppServices.shared.isConfigured else { return }
-        await sync()
+        await sync(scope: .newDocuments)
     }
 
     /// Shows the most recent documents when there is nothing to search for, so the app never
