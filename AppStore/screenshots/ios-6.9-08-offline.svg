@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="2868" viewBox="0 0 1320 2868">
+  <title>Offline, still searching</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12151b"/>
+      <stop offset="1" stop-color="#1b2029"/>
+    </linearGradient>
+  </defs>
+  <rect width="1320" height="2868" fill="url(#bg)"/>
+  <rect x="92.4" y="92.4" width="1135" height="2683"
+        rx="37" fill="none" stroke="#3a4353" stroke-width="4"
+        stroke-dasharray="24 18"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif"
+     text-anchor="middle">
+    <text x="660" y="1236" fill="#5d6b82"
+          font-size="45" letter-spacing="7.9">PLACEHOLDER 08 OF 8</text>
+    <text x="660" y="1355" fill="#e8ecf3"
+          font-size="82" font-weight="600">Offline, still searching</text>
+    <text x="660" y="1447" fill="#8e9bb0"
+          font-size="45">Airplane mode in the status bar, results still on screen.</text>
+    <text x="660" y="1592" fill="#c8d2e2"
+          font-size="53" font-style="italic">caption: “Works with no signal”</text>
+    <text x="660" y="2688" fill="#5d6b82"
+          font-size="42">iPhone 6.9″ · portrait</text>
+    <text x="660" y="2747" fill="#46506180"
+          font-size="40" font-family="ui-monospace, Menlo, monospace">1320 × 2868</text>
+  </g>
+</svg>
