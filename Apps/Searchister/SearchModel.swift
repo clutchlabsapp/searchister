@@ -23,6 +23,17 @@ final class SearchModel {
     var failedUploads: [OutboxItem] = []
     var errorMessage: String?
 
+    /// Bumped to ask the search field to take focus. A counter rather than a flag so two Cmd-F
+    /// presses in a row both register — the view watches for a change, and a flag that is already
+    /// true does not change.
+    var focusSearchToken = 0
+
+    /// Puts the cursor in the search field. Driven by the Find command, which lives in the app's
+    /// menu and so cannot reach the field's focus state directly.
+    func focusSearch() {
+        focusSearchToken += 1
+    }
+
     private var searchTask: Task<Void, Never>?
     private var isSyncing = false
 

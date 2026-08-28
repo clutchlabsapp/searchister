@@ -129,6 +129,20 @@ Details worth knowing if you touch this code:
   Unix timestamp while `/search`'s query-string form wants `YYYY-MM-DD` (the JSON `query` object
   takes a timestamp).
 
+## Around the app
+
+Command-F puts the cursor in the search field, on macOS and on iPadOS with a hardware keyboard.
+Command-R syncs.
+
+The detail pane, when nothing is selected, carries a link to
+[Hister's donation page](https://hister.org/support) and a short reference for the query language —
+the fields, phrases, negation, alternation, wildcards and `sort:` directives the server supports,
+with a note on which of them the offline cache can honour. There is a second donation link at the
+top of Settings.
+
+New labels are lowercased as they are created. Labels already on the server keep the case they were
+given; rewriting those is the user's call, not a side effect of opening a document.
+
 ## What the offline cache holds
 
 Document metadata plus roughly the first 1,500 characters of each document's text, in a SQLite

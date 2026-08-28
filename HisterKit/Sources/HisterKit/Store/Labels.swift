@@ -33,13 +33,26 @@ public enum Labels {
     }
 
     /// Adds a label, ignoring blanks and case-insensitive duplicates.
+    ///
+    /// New labels are lowercased. The server matches them case-insensitively either way, so the
+    /// only thing mixed case changes is how a set of labels reads back — and "Reading, reading
+    /// list, READING" is one label typed three ways, which is worth not accumulating.
     public static func adding(_ label: String, to labels: [String]) -> [String] {
-        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = normalise(label)
         guard !trimmed.isEmpty else { return labels }
         guard !labels.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else {
             return labels
         }
         return labels + [trimmed]
+    }
+
+    /// The canonical form of a newly created label: trimmed and lowercased.
+    ///
+    /// Applied when a label is created, not when one is read. Labels already stored on the server
+    /// keep whatever case they were given — rewriting those is the user's call, not a side effect
+    /// of opening a document.
+    public static func normalise(_ label: String) -> String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     public static func removing(_ label: String, from labels: [String]) -> [String] {

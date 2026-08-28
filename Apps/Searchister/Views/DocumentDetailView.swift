@@ -19,11 +19,16 @@ struct DocumentDetailView: View {
         Group {
             if let document {
                 content(for: document)
+            } else if url == nil {
+                WelcomePane()
             } else {
+                // A URL that resolves to nothing cached — a document deleted from under the
+                // selection, most often. Saying so beats the welcome pane, which would read as
+                // "you have not picked anything" when the user just did.
                 ContentUnavailableView(
-                    "No document selected",
-                    systemImage: "doc.text",
-                    description: Text("Pick a result to read it here.")
+                    "Not in the cache",
+                    systemImage: "questionmark.folder",
+                    description: Text("This document is no longer in the offline copy of your index.")
                 )
             }
         }

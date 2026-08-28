@@ -19,6 +19,12 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // First thing in Settings on purpose: the server this app depends on is somebody
+            // else's unpaid work, and Settings is where a person is already thinking about it.
+            Section("Support Hister") {
+                SupportHisterCard(isCard: false)
+            }
+
             Section("Server") {
                 TextField("Server URL", text: $serverURL, prompt: Text("https://hister.example.com"))
                     #if os(iOS)

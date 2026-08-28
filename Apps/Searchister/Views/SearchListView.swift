@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SearchListView: View {
     @Environment(SearchModel.self) private var model
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -35,6 +36,10 @@ struct SearchListView: View {
         }
         .listStyle(.inset)
         .searchable(text: $model.query, prompt: "Search your index")
+        .searchFocused($isSearchFocused)
+        // Command-F comes in through the menu, which has no way to reach this view's focus state,
+        // so the model carries the request across.
+        .onChange(of: model.focusSearchToken) { _, _ in isSearchFocused = true }
         .onChange(of: model.query) { _, _ in model.queryChanged() }
         .refreshable { await model.refreshNewDocuments() }
         .overlay {
