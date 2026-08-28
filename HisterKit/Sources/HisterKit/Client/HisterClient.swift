@@ -14,7 +14,7 @@ public protocol HisterAPI: Sendable {
     func preview(url: String, extractor: String?) async throws -> String
     func history(cursor: String?, since: Int64?, until: Int64?, filter: String?) async throws -> HisterHistoryPage
     func facets(domainLimit: Int) async throws -> HisterFacets
-    func batchGet(urls: [String]) async throws -> [BatchGetResult]
+    func batchGet(urls: [String]) async throws -> [HisterClient.BatchGetResult]
     func documentBySearch(url: String) async throws -> HisterDocument?
     func stats() async throws -> HisterStats
     func add(_ document: HisterDocument) async throws
