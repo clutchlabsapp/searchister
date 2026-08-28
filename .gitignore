@@ -20,6 +20,10 @@ Scripts/LinuxCheck/Sources/
 Scripts/LinuxCheck/Tests/
 Scripts/LinuxCheck/Package.resolved
 
+# Resolved by a bare `swift build` inside the package. Xcode resolves the app's dependencies
+# through the project workspace, which is what actually pins them; a second file here only drifts.
+HisterKit/Package.resolved
+
 # macOS
 .DS_Store
 
