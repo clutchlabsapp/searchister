@@ -9,7 +9,9 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000041 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000061 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000301 /* HisterKit */; };
+		A10000000000000000000042 /* SpotlightIndexExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* SpotlightIndexExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000062 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000302 /* HisterKit */; };
+		A10000000000000000000063 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000303 /* HisterKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -19,6 +21,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = A10000000000000000000102;
 			remoteInfo = ShareExtension;
+		};
+		A10000000000000000000502 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000103;
+			remoteInfo = SpotlightIndexExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -30,6 +39,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				A10000000000000000000041 /* ShareExtension.appex in Embed Foundation Extensions */,
+				A10000000000000000000042 /* SpotlightIndexExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -47,6 +57,10 @@
 		A10000000000000000000018 /* ShareExtension-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShareExtension-iOS.entitlements"; sourceTree = "<group>"; };
 		A10000000000000000000019 /* ShareExtension-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "ShareExtension-macOS.entitlements"; sourceTree = "<group>"; };
 		A1000000000000000000001A /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		A1000000000000000000001B /* SpotlightIndexExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SpotlightIndexExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000000000000000000001C /* SpotlightIndexExtension-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "SpotlightIndexExtension-Info.plist"; sourceTree = "<group>"; };
+		A1000000000000000000001D /* SpotlightIndexExtension-iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SpotlightIndexExtension-iOS.entitlements"; sourceTree = "<group>"; };
+		A1000000000000000000001E /* SpotlightIndexExtension-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SpotlightIndexExtension-macOS.entitlements"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -73,6 +87,11 @@
 			path = ShareExtension;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000023 /* SpotlightIndexExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SpotlightIndexExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +108,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000062 /* HisterKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000053 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000063 /* HisterKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -110,6 +137,7 @@
 			children = (
 				A10000000000000000000021 /* Searchister */,
 				A10000000000000000000022 /* ShareExtension */,
+				A10000000000000000000023 /* SpotlightIndexExtension */,
 			);
 			path = Apps;
 			sourceTree = "<group>";
@@ -124,6 +152,9 @@
 				A10000000000000000000017 /* ShareExtension-Info.plist */,
 				A10000000000000000000018 /* ShareExtension-iOS.entitlements */,
 				A10000000000000000000019 /* ShareExtension-macOS.entitlements */,
+				A1000000000000000000001C /* SpotlightIndexExtension-Info.plist */,
+				A1000000000000000000001D /* SpotlightIndexExtension-iOS.entitlements */,
+				A1000000000000000000001E /* SpotlightIndexExtension-macOS.entitlements */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -133,6 +164,7 @@
 			children = (
 				A10000000000000000000011 /* Searchister.app */,
 				A10000000000000000000012 /* ShareExtension.appex */,
+				A1000000000000000000001B /* SpotlightIndexExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -153,6 +185,7 @@
 			);
 			dependencies = (
 				A10000000000000000000091 /* PBXTargetDependency */,
+				A10000000000000000000092 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000021 /* Searchister */,
@@ -188,6 +221,29 @@
 			productReference = A10000000000000000000012 /* ShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		A10000000000000000000103 /* SpotlightIndexExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000203 /* Build configuration list for PBXNativeTarget "SpotlightIndexExtension" */;
+			buildPhases = (
+				A10000000000000000000073 /* Sources */,
+				A10000000000000000000053 /* Frameworks */,
+				A10000000000000000000083 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000023 /* SpotlightIndexExtension */,
+			);
+			name = SpotlightIndexExtension;
+			packageProductDependencies = (
+				A10000000000000000000303 /* HisterKit */,
+			);
+			productName = SpotlightIndexExtension;
+			productReference = A1000000000000000000001B /* SpotlightIndexExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -202,6 +258,9 @@
 						CreatedOnToolsVersion = 16.0;
 					};
 					A10000000000000000000102 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					A10000000000000000000103 = {
 						CreatedOnToolsVersion = 16.0;
 					};
 				};
@@ -225,6 +284,7 @@
 			targets = (
 				A10000000000000000000101 /* Searchister */,
 				A10000000000000000000102 /* ShareExtension */,
+				A10000000000000000000103 /* SpotlightIndexExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -238,6 +298,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A10000000000000000000082 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000083 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -261,6 +328,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000073 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -268,6 +342,11 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000102 /* ShareExtension */;
 			targetProxy = A10000000000000000000501 /* PBXContainerItemProxy */;
+		};
+		A10000000000000000000092 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000103 /* SpotlightIndexExtension */;
+			targetProxy = A10000000000000000000502 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -470,6 +549,76 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000241 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Config/SpotlightIndexExtension-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Config/SpotlightIndexExtension-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Config/SpotlightIndexExtension-macOS.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = U3286CH8VT;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/SpotlightIndexExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Searchister;
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphone*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.clutchlabs.searchister.spotlight;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A10000000000000000000242 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Config/SpotlightIndexExtension-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Config/SpotlightIndexExtension-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "Config/SpotlightIndexExtension-macOS.entitlements";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = U3286CH8VT;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Config/SpotlightIndexExtension-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Searchister;
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphone*]" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.clutchlabs.searchister.spotlight;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -500,6 +649,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000000000000000000203 /* Build configuration list for PBXNativeTarget "SpotlightIndexExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000241 /* Debug */,
+				A10000000000000000000242 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -515,6 +673,10 @@
 			productName = HisterKit;
 		};
 		A10000000000000000000302 /* HisterKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HisterKit;
+		};
+		A10000000000000000000303 /* HisterKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = HisterKit;
 		};

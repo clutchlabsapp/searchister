@@ -33,6 +33,18 @@ final class FakeSearchableIndex: CSSearchableIndex, @unchecked Sendable {
         indexedItems.removeAll()
         completionHandler?(nil)
     }
+
+    /// Identifiers the indexer asked Spotlight to forget.
+    var deletedIdentifiers: [String] = []
+
+    override func deleteSearchableItems(
+        withIdentifiers identifiers: [String],
+        completionHandler: ((Error?) -> Void)? = nil
+    ) {
+        deletedIdentifiers.append(contentsOf: identifiers)
+        indexedItems.removeAll { identifiers.contains($0.uniqueIdentifier) }
+        completionHandler?(nil)
+    }
 }
 
 @Suite("SpotlightIndexer")
@@ -41,6 +53,66 @@ struct SpotlightIndexerTests {
         let (local, cleanup) = try LocalIndex.temporary()
         let fake = FakeSearchableIndex(name: "searchister-tests")
         return (SpotlightIndexer(index: local, searchableIndex: fake), local, fake, cleanup)
+    }
+
+    /// What the Spotlight index extension calls when the system has lost specific items. It must
+    /// answer for exactly the identifiers it was given, and no others — the system asked about
+    /// those because it no longer holds them.
+    @Test("reindexing by identifier republishes only what was asked for")
+    func reindexByIdentifier() async throws {
+        let (indexer, local, fake, cleanup) = try makeIndexer()
+        defer { cleanup() }
+
+        let urls = (0..<4).map { "https://example.com/\($0)" }
+        try local.upsert(urls.map {
+            CachedDocument(document: makeDocument(url: $0, title: "T", text: "body"))
+        })
+        // Everything is already published as far as the app is concerned; the system disagrees.
+        try await indexer.indexChangedDocuments()
+        fake.indexedItems.removeAll()
+
+        try await indexer.reindex(identifiers: [urls[1], urls[3]])
+
+        #expect(fake.indexedItems.map(\.uniqueIdentifier).sorted() == [urls[1], urls[3]].sorted())
+        #expect(fake.deletedIdentifiers.isEmpty)
+    }
+
+    /// An identifier Spotlight asks about but the cache no longer holds is a document deleted
+    /// since. Leaving it alone keeps a Spotlight result that opens nothing.
+    @Test("an identifier no longer cached is removed from Spotlight")
+    func reindexDropsDeletedIdentifiers() async throws {
+        let (indexer, local, fake, cleanup) = try makeIndexer()
+        defer { cleanup() }
+
+        try local.upsert([CachedDocument(document: makeDocument(url: "https://example.com/kept"))])
+
+        try await indexer.reindex(identifiers: [
+            "https://example.com/kept",
+            "https://example.com/gone",
+        ])
+
+        #expect(fake.indexedItems.map(\.uniqueIdentifier) == ["https://example.com/kept"])
+        #expect(fake.deletedIdentifiers == ["https://example.com/gone"])
+    }
+
+    /// The full-reindex path clears every per-row marker before publishing, which is what makes
+    /// it safe for the extension to be killed halfway: the app's next sync finishes the job.
+    @Test("a full reindex leaves nothing marked as published until Spotlight accepts it")
+    func reindexAllRepublishesEverything() async throws {
+        let (indexer, local, fake, cleanup) = try makeIndexer()
+        defer { cleanup() }
+
+        try local.upsert((0..<3).map {
+            CachedDocument(document: makeDocument(url: "https://example.com/\($0)"))
+        })
+        try await indexer.indexChangedDocuments()
+        #expect(try local.countNeedingSpotlight() == 0)
+        fake.indexedItems.removeAll()
+
+        try await indexer.reindexAll()
+
+        #expect(fake.indexedItems.count == 3)
+        #expect(try local.countNeedingSpotlight() == 0)
     }
 
     /// The regression. `beginBatch()` is only valid on an index created with

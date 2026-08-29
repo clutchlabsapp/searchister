@@ -204,6 +204,17 @@ public struct LocalIndex: Sendable {
             && lhs.updated == rhs.updated
     }
 
+    /// Fetches specific rows by URL.
+    ///
+    /// Used by the Spotlight index extension, which is handed a list of identifiers by the system
+    /// and has to answer for exactly those.
+    public func documents(urls: [String]) throws -> [CachedDocument] {
+        guard !urls.isEmpty else { return [] }
+        return try dbPool.read { db in
+            try CachedDocument.filter(urls.contains(Column("url"))).fetchAll(db)
+        }
+    }
+
     /// Rows that still need publishing to Spotlight, newest first.
     public func documentsNeedingSpotlight(limit: Int) throws -> [CachedDocument] {
         try dbPool.read { db in

@@ -143,11 +143,33 @@ top of Settings.
 New labels are lowercased as they are created. Labels already on the server keep the case they were
 given; rewriting those is the user's call, not a side effect of opening a document.
 
+## Why there is a Spotlight index extension
+
+`Apps/SpotlightIndexExtension` exists to answer a question the app cannot hear.
+
+Each cached row carries a `spotlight_synced_at` marker meaning "Spotlight already has the current
+version of this". Nothing clears that marker when the *system* discards the index it was published
+into — after an OS index rebuild, a device migration, or a restore from backup. The rows stay
+marked, the app republishes nothing, and the entire index quietly stops appearing in Spotlight
+until someone thinks to rebuild the cache by hand.
+
+Registering an extension at `com.apple.corespotlight.index` is the only way to be told it
+happened. The system launches it with no app running and asks for either everything
+(`reindexAll()`) or specific identifiers (`reindex(identifiers:)`); both are served entirely from
+the shared database, so the extension needs neither the network nor the Keychain — its
+entitlements are the App Group and nothing else.
+
+Both paths are safe to be killed halfway. A full reindex clears every per-row marker *before*
+publishing, and an identifier reindex marks rows only once Spotlight has accepted them, so
+whatever the extension does not finish is left looking unpublished and the app's next ordinary
+sync completes it.
+
 ## Checking changes without a Mac
 
 `Scripts/linux-check.sh` compiles and tests the portable part of `HisterKit` against a Linux Swift
 toolchain — the client, the local index, sync and search, which is where nearly all the logic is.
-Six files cannot build there (`KeychainStore` needs Security, `SpotlightIndexer` CoreSpotlight,
+Nothing in `Apps/` is checkable this way, the index extension included. Six library files cannot
+build there either (`KeychainStore` needs Security, `SpotlightIndexer` CoreSpotlight,
 `DocumentExtractor` UIKit, `PageFetcher` the CoreFoundation charset APIs, `OutboxUploader` a
 background `URLSession`, and `IngestService` depends on those); `KeychainStore` and `AppGroup` are
 replaced by stubs with identical signatures so everything downstream still typechecks against the
