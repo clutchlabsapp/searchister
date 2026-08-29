@@ -177,12 +177,17 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
         HisterFacets(terms: [HisterClient.domainFacetName: HisterTermFacet(terms: facetDomains, other: 0)])
     }
 
+    /// Makes every `/api/history` and `/api/batch` call answer 401, which is what a Hister server
+    /// does for a client with no access token — `/search` stays readable on a public instance.
+    var authenticatedEndpointsRefused = false
+
     func history(
         cursor: String?,
         since: Int64?,
         until: Int64?,
         filter: String?
     ) async throws -> HisterHistoryPage {
+        if authenticatedEndpointsRefused { throw HisterError.unauthorized(detail: "no token") }
         recordedFilters.append(filter)
         recordedHistoryCursors.append(cursor)
         recordedHistorySince.append(since)
@@ -260,6 +265,7 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     var batchReturnsNothing = false
 
     func batchGet(urls: [String]) async throws -> [HisterClient.BatchGetResult] {
+        if authenticatedEndpointsRefused { throw HisterError.unauthorized(detail: "no token") }
         recordedBatchURLs.append(urls)
         return urls.map { url in
             if batchReturnsNothing {

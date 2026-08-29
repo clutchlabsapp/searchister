@@ -168,10 +168,25 @@ public actor SyncEngine {
     ///
     /// - Parameter onPage: receives each page; returns how many documents it newly recorded.
     private func walkAll(onPage: ([HisterDocument]) throws -> Int) async throws {
-        try await walkBySearch(onPage: onPage)
-        try await walkByDateWindows(onPage: onPage)
-        try await walkByCursor(onPage: onPage)
-        try await walkByDomain(onPage: onPage)
+        var reachedBySearch = 0
+        try await walkBySearch { documents in
+            reachedBySearch += documents.count
+            return try onPage(documents)
+        }
+
+        // The three backstops all go through `/api/history`, which Hister never exempts from
+        // authentication — unlike `/search`, which a public instance serves to anyone. So a
+        // token-less configuration, the built-in demo included, is refused by all of them while
+        // the search pass works fine. That is not a failed sync: the index has been enumerated,
+        // just without the belt-and-braces passes. It *is* a failed sync if the search pass
+        // reached nothing, because then nothing has been enumerated at all.
+        do {
+            try await walkByDateWindows(onPage: onPage)
+            try await walkByCursor(onPage: onPage)
+            try await walkByDomain(onPage: onPage)
+        } catch HisterError.unauthorized where reachedBySearch > 0 {
+            return
+        }
     }
 
     /// Pages the whole index through a match-all `/search`, text included.
@@ -478,7 +493,15 @@ public actor SyncEngine {
 
             phase = .enriching(done: enriched, remaining: remaining)
 
-            let results = try await client.batchGet(urls: urls)
+            let results: [HisterClient.BatchGetResult]
+            do {
+                results = try await client.batchGet(urls: urls)
+            } catch HisterError.unauthorized {
+                // `/api/batch` is authenticated, so a token-less configuration cannot enrich at
+                // all. It barely needs to: the search pass this sync leads with brings each
+                // document's text with it, so there is little here to fill in.
+                break
+            }
 
             var rows: [CachedDocument] = []
             var exhausted: [String] = []

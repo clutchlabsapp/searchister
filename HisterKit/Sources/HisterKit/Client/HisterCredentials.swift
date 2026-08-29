@@ -9,6 +9,24 @@ public struct HisterCredentials: Sendable, Equatable {
         self.baseURL = baseURL
         self.accessToken = accessToken
     }
+
+    /// The public Hister demo, used when the app has not been set up yet.
+    ///
+    /// It stands in for "no server" so that a fresh install has something to search rather than an
+    /// empty screen and a form. Nothing is stored for it: the moment real credentials are saved
+    /// this stops being returned, and clearing them brings it back.
+    public static let demo = HisterCredentials(
+        baseURL: URL(string: "https://demo.hister.org")!,
+        accessToken: ""
+    )
+
+    /// Whether these are the built-in demo credentials rather than the user's own.
+    ///
+    /// Read by everything that must not treat someone else's public server as the user's own
+    /// index — writes above all. An empty token is the marker, because that is also exactly what
+    /// makes this configuration read-only: Hister exempts only its `Public` endpoints from
+    /// authentication, and every write is outside that set.
+    public var isDemo: Bool { accessToken.isEmpty }
 }
 
 /// Persists the server URL and access token as a single item in the **iCloud Keychain**, so the
@@ -82,8 +100,22 @@ public struct CredentialsStore: Sendable {
         load()?.accessToken
     }
 
-    /// The credentials, or `nil` when the app has not been set up yet.
-    public func credentials() -> HisterCredentials? {
+    /// The credentials the app should use: the user's own, or the public demo when nothing has
+    /// been saved.
+    ///
+    /// Never `nil`, so a fresh install has a working index to search instead of an empty screen
+    /// and a form to fill in. See `HisterCredentials.demo` for what that costs — it is read-only,
+    /// and `isDemo` is how the rest of the app knows.
+    public func credentials() -> HisterCredentials {
+        storedCredentials() ?? .demo
+    }
+
+    /// The user's own credentials, or `nil` when they have not set the app up.
+    ///
+    /// The distinction from `credentials()` matters wherever the demo is not an acceptable
+    /// substitute — deciding whether to prompt for setup, and refusing to write to a server the
+    /// user did not choose.
+    public func storedCredentials() -> HisterCredentials? {
         guard let stored = load(),
               let url = URL(string: stored.baseURL),
               !stored.accessToken.isEmpty
@@ -92,6 +124,9 @@ public struct CredentialsStore: Sendable {
         }
         return HisterCredentials(baseURL: url, accessToken: stored.accessToken)
     }
+
+    /// Whether the user has saved their own server.
+    public var isConfigured: Bool { storedCredentials() != nil }
 
     /// Saves the credentials and confirms they read back.
     ///
@@ -118,7 +153,7 @@ public struct CredentialsStore: Sendable {
         } catch {
             return false
         }
-        return credentials() == newCredentials
+        return storedCredentials() == newCredentials
     }
 
     public func clear() {

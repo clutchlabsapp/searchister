@@ -74,7 +74,9 @@ struct ShareView: View {
     let onCancel: () -> Void
 
     @State private var state: ShareState = .working
-    @State private var isConfigured = CredentialsStore().credentials() != nil
+    // Deliberately the *stored* credentials: sharing into the public demo server is not something
+    // to do on someone's behalf, so the extension asks for setup rather than falling back to it.
+    @State private var isConfigured = CredentialsStore().isConfigured
 
     enum ShareState {
         case working

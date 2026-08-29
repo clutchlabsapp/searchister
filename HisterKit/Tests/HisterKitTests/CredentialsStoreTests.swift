@@ -52,11 +52,39 @@ struct CredentialsStoreTests {
         let keychain = FakeKeychain()
         let store = makeStore(keychain)
 
-        #expect(store.credentials() == nil)
+        #expect(store.storedCredentials() == nil)
+        #expect(store.isConfigured == false)
 
         let credentials = HisterCredentials(baseURL: url, accessToken: "token-1")
         #expect(store.store(credentials))
+        #expect(store.storedCredentials() == credentials)
         #expect(store.credentials() == credentials)
+        #expect(store.isConfigured)
+    }
+
+    /// A fresh install has something to search rather than an empty screen and a form, so reads
+    /// fall back to the public demo. Everything that must not treat someone else's server as the
+    /// user's own asks `isConfigured` or `storedCredentials()` instead.
+    @Test("with nothing saved, reads fall back to the demo server")
+    func demoFallback() {
+        let store = makeStore(FakeKeychain())
+
+        #expect(store.storedCredentials() == nil)
+        #expect(store.credentials() == HisterCredentials.demo)
+        #expect(store.credentials().baseURL.absoluteString == "https://demo.hister.org")
+        #expect(store.credentials().isDemo)
+        #expect(store.isConfigured == false)
+    }
+
+    /// The demo has no token, and that is exactly what makes it read-only: Hister exempts only
+    /// its `Public` endpoints from authentication, and every write is outside that set.
+    @Test("a saved server is never mistaken for the demo")
+    func realCredentialsAreNotDemo() {
+        let store = makeStore(FakeKeychain())
+        #expect(store.store(HisterCredentials(baseURL: url, accessToken: "token")))
+
+        #expect(store.credentials().isDemo == false)
+        #expect(HisterCredentials.demo.isDemo)
     }
 
     /// The regression. Replacing the token has to be what every later read returns; the bug was
@@ -106,6 +134,9 @@ struct CredentialsStoreTests {
 
         #expect(store.store(HisterCredentials(baseURL: url, accessToken: "token")))
         store.clear()
-        #expect(store.credentials() == nil)
+        #expect(store.storedCredentials() == nil)
+        #expect(store.isConfigured == false)
+        // Clearing returns the app to the demo rather than to nothing.
+        #expect(store.credentials() == HisterCredentials.demo)
     }
 }

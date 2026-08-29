@@ -39,6 +39,15 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                if AppServices.shared.isUsingDemoServer {
+                    Label(
+                        "Until you save a server, Searchister reads the public demo at demo.hister.org so there is something to search. It is read-only — nothing you save can go there.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
                 Label(
                     "Saved to your iCloud Keychain, so your other devices pick up the same server and token automatically.",
                     systemImage: "icloud"

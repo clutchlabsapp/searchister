@@ -52,6 +52,44 @@ struct SyncEngineTests {
         #expect(hits.count == 5)
     }
 
+    /// Hister exempts only its `Public` endpoints from authentication, and `/api/history` and
+    /// `/api/batch` are not among them — so a client with no token, which is what the built-in
+    /// demo server is, is refused by every backstop walk while `/search` keeps working. That has
+    /// to be a complete sync, not a failed one.
+    @Test("a sync completes when only the public endpoints are readable")
+    func syncSurvivesUnauthenticatedBackstops() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<4).map {
+            makeDocument(url: "https://example.com/\($0)", text: "body \($0)", updated: Int64(1_000 + $0))
+        }
+        api.authenticatedEndpointsRefused = true
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.documentCount() == 4)
+        #expect(try index.countWithText() == 4)
+    }
+
+    /// But a refusal with nothing enumerated is a real failure — the token is wrong, or the
+    /// server is not public — and swallowing it would leave an empty cache looking healthy.
+    @Test("a sync that reaches nothing at all still fails")
+    func syncFailsWhenNothingIsReadable() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.authenticatedEndpointsRefused = true
+
+        let engine = SyncEngine(client: api, index: index)
+        await #expect(throws: HisterError.self) {
+            _ = try await engine.sync()
+        }
+    }
+
     /// The fault that left a fully enumerated cache recorded as having no text at all.
     /// `document.Document` has no `omitempty`, so `/api/history` sends `"text": ""`,
     /// `"domain": ""` and `"label": ""` for every document even though it populates none of

@@ -34,11 +34,15 @@ public struct HisterClient: HisterAPI {
         self.session = session
     }
 
-    /// Convenience initialiser that reads the stored credentials, throwing `.notConfigured`
-    /// when the app has not been set up yet.
-    public init(store: CredentialsStore = CredentialsStore(), session: URLSession = .shared) throws {
-        guard let credentials = store.credentials() else { throw HisterError.notConfigured }
-        self.init(credentials: credentials, session: session)
+    /// Convenience initialiser that reads the stored credentials, falling back to the public demo
+    /// server when the app has not been set up.
+    ///
+    /// It cannot fail: a client that can read *something* is more useful than one that refuses to
+    /// exist, and every write it might attempt against the demo is refused by the server anyway.
+    /// Callers that must not touch a server the user did not choose check
+    /// `credentials.isDemo` — see `OutboxUploader`.
+    public init(store: CredentialsStore = CredentialsStore(), session: URLSession = .shared) {
+        self.init(credentials: store.credentials(), session: session)
     }
 
     // MARK: - Reads
@@ -59,7 +63,17 @@ public struct HisterClient: HisterAPI {
     /// `/api/history` is `Public: false, NoAuth: false`, so it is always authenticated. It is
     /// also the first call sync makes, which is the property that matters: if this succeeds,
     /// syncing will not fail on authentication.
+    /// `/api/history` is `Public: false, NoAuth: false`, so it is always authenticated. It is
+    /// also the first call sync makes, which is the property that matters: if this succeeds,
+    /// syncing will not fail on authentication.
+    ///
+    /// With no token there is nothing to authenticate, and that probe would fail by definition —
+    /// so a token-less configuration is checked against what it is actually entitled to read.
     public func verifyAccess() async throws {
+        guard !builder.credentials.isDemo else {
+            _ = try await search(HisterQuery.enumeratingAll(limit: 1))
+            return
+        }
         _ = try await history(cursor: nil, since: nil, until: nil, filter: nil)
     }
 

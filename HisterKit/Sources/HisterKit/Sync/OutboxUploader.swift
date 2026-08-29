@@ -69,10 +69,12 @@ public final class OutboxUploader: NSObject, @unchecked Sendable {
         let activeIDs = Set(active.compactMap(\.taskDescription))
         try? outbox.reclaimOrphans(activeTaskIDs: activeIDs)
 
-        guard let credentials = credentialsStore.credentials() else {
-            // Nothing to do until the user finishes setup; the queue keeps waiting.
-            return
-        }
+        // `credentialsStore.credentials()` falls back to the public demo server, which is fine
+        // for reading and unacceptable here: uploading someone's saved pages to a server they did
+        // not choose — a public one at that — is not a thing to do by default. The queue simply
+        // waits until they set up their own, which is the same behaviour as before there was a
+        // demo to fall back to.
+        guard let credentials = credentialsStore.storedCredentials() else { return }
         let builder = HisterRequestBuilder(credentials: credentials)
 
         guard let due = try? outbox.dueItems() else { return }

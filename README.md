@@ -143,6 +143,32 @@ top of Settings.
 New labels are lowercased as they are created. Labels already on the server keep the case they were
 given; rewriting those is the user's call, not a side effect of opening a document.
 
+## The demo server
+
+With nothing saved, `CredentialsStore.credentials()` returns `HisterCredentials.demo` —
+`https://demo.hister.org`, with no access token — so a fresh install has an index to search rather
+than an empty screen and a form. Saving a server replaces it; clearing one brings it back.
+
+The empty token is not an oversight, it is the mechanism. Hister exempts only its `Public`
+endpoints from authentication when the instance runs in public mode, and every write is outside
+that set, so a token-less client is read-only *at the server*, not merely by convention here. What
+it can reach: `/search`, `/api/config`, `/api/facets`, `/api/document`, `/api/stats`. What it
+cannot: `/api/history`, `/api/batch`, and every write.
+
+Three consequences worth knowing before changing any of this:
+
+- **Sync still works, on the search pass alone.** The match-all `/search` enumeration carries each
+  document's text, so it needs none of the authenticated endpoints. The three `/api/history`
+  backstops are skipped when the server refuses them *and* the search pass reached something; if
+  it reached nothing, that is a real failure and still throws.
+- **Nothing is uploaded to it.** `OutboxUploader` and the share extension ask
+  `storedCredentials()`, not `credentials()`, so a queued page waits for the user's own server
+  rather than being pushed to a public one they did not choose. Reads use `credentials()`; writes
+  use `storedCredentials()`, and that split is the whole safety property.
+- **The UI says so, in four places** — the status bar, the empty state, the detail pane and
+  Settings. Results from a stranger's server must never be mistaken for the user's own reading,
+  and that is the only thing making this defensible rather than merely convenient.
+
 ## Why there is a Spotlight index extension
 
 `Apps/SpotlightIndexExtension` exists to answer a question the app cannot hear.

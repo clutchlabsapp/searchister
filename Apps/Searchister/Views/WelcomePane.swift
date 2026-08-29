@@ -10,6 +10,9 @@ struct WelcomePane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                if AppServices.shared.isUsingDemoServer {
+                    DemoServerCard()
+                }
                 SupportHisterCard()
                 QuerySyntaxReference()
             }
@@ -26,6 +29,46 @@ struct WelcomePane: View {
             Text("Pick a result on the left to read it here.")
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Says plainly whose index is on screen.
+///
+/// Until a server is saved the app reads the public Hister demo, so that a fresh install has
+/// something to search instead of an empty screen and a form. That is only defensible if it is
+/// obvious — results from a stranger's server must never be mistaken for the user's own reading.
+struct DemoServerCard: View {
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
+    @Environment(SearchModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("You are searching the Hister demo", systemImage: "info.circle")
+                .font(.headline)
+
+            Text("These pages are the public demo index at demo.hister.org, not yours. It is read-only: nothing you save can go there. Point Searchister at your own Hister server to search what you have actually read.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Settings") { showSettings() }
+                .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.4))
+        }
+    }
+
+    private func showSettings() {
+        #if os(macOS)
+        openSettings()
+        #else
+        model.isShowingSettings = true
+        #endif
     }
 }
 

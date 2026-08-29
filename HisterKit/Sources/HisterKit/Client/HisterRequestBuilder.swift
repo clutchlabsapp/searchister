@@ -16,7 +16,7 @@ import Foundation
 public struct HisterRequestBuilder: Sendable {
     public static let originHeaderValue = "hister://"
 
-    private let credentials: HisterCredentials
+    let credentials: HisterCredentials
 
     public init(credentials: HisterCredentials) {
         self.credentials = credentials

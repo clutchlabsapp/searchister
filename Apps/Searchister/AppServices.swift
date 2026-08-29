@@ -33,7 +33,12 @@ public final class AppServices {
         }
     }
 
-    public var isConfigured: Bool { credentials.credentials() != nil }
+    /// Whether the user has saved their own server. False while the app is reading the public
+    /// demo, which is why this is not the same question as "can the app reach a server".
+    public var isConfigured: Bool { credentials.isConfigured }
+
+    /// Whether the app is currently reading the built-in demo rather than the user's own server.
+    public var isUsingDemoServer: Bool { !credentials.isConfigured }
 
     public var search: SearchService? {
         guard let index else { return nil }
@@ -60,7 +65,8 @@ public final class AppServices {
 
     /// The sync engine is rebuilt whenever credentials change, since it captures a client.
     public func syncEngine() -> SyncEngine? {
-        guard let index, let creds = credentials.credentials() else { return nil }
+        guard let index else { return nil }
+        let creds = credentials.credentials()
         if let _sync { return _sync }
         let engine = SyncEngine(client: HisterClient(credentials: creds), index: index)
         _sync = engine
