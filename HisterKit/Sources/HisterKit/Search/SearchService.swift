@@ -44,7 +44,7 @@ public struct SearchService: Sendable {
     }
 
     public init(index: LocalIndex, store: CredentialsStore = CredentialsStore()) {
-        self.init(index: index, clientProvider: { try HisterClient(store: store) })
+        self.init(index: index, clientProvider: { HisterClient(store: store) })
     }
 
     /// Cache-only search. Used by App Intents and Spotlight, where a slow network round trip is

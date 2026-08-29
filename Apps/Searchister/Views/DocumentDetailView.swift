@@ -209,7 +209,7 @@ struct DocumentDetailView: View {
         defer { isDeleting = false }
 
         do {
-            let client = try HisterClient(store: AppServices.shared.credentials)
+            let client = HisterClient(store: AppServices.shared.credentials)
             try await client.deleteDocument(url: url)
 
             // Remove it locally too, rather than waiting for the next reconcile — otherwise the
@@ -231,7 +231,7 @@ struct DocumentDetailView: View {
 
         let joined = Labels.format(labels)
         do {
-            let client = try HisterClient(store: AppServices.shared.credentials)
+            let client = HisterClient(store: AppServices.shared.credentials)
             // An empty string is how the server is told to clear the label.
             try await client.setLabel(url: url, label: joined)
             if var updated = document {
