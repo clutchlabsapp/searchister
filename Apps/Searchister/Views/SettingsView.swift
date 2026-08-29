@@ -19,6 +19,12 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            // First thing in Settings on purpose: the server this app depends on is somebody
+            // else's unpaid work, and Settings is where a person is already thinking about it.
+            Section("Support Hister") {
+                SupportHisterCard(isCard: false)
+            }
+
             Section("Server") {
                 TextField("Server URL", text: $serverURL, prompt: Text("https://hister.example.com"))
                     #if os(iOS)
@@ -32,6 +38,15 @@ struct SettingsView: View {
                 Text("Sent as the X-Access-Token header. On a single-user server this is `app.access_token` from your Hister config; if your server has multi-user mode enabled it must instead be a personal API token from your Hister profile.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if AppServices.shared.isUsingDemoServer {
+                    Label(
+                        "Until you save a server, Searchister reads the public demo at demo.hister.org so there is something to search. It is read-only — nothing you save can go there.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
 
                 Label(
                     "Saved to your iCloud Keychain, so your other devices pick up the same server and token automatically.",

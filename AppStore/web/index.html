@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Searchister · Clutch Labs</title>
+  <meta name="description" content="A native iPhone, iPad and Mac client for Hister, the self-hosted search engine. Search your index from Spotlight, save pages from any app, and keep a searchable copy on device.">
+
+  <!--
+    Deploy this at /searchister on clutchlabs.app. It links the site's own stylesheet and reuses
+    its classes — .container, .section, .btn, .service-card, .checklist, .screenshots — so it
+    inherits any change made there. The block below adds only what the site does not already have.
+
+    Opening this file straight off disk will look unstyled: /style.css is an absolute path and
+    resolves only when served from the site root.
+  -->
+  <link rel="stylesheet" type="text/css" href="/style.css"/>
+  <style>
+    /* App-specific additions. Everything else comes from the site stylesheet. */
+    .app-hero-icon { width: 6rem; height: 6rem; border-radius: 1.35rem; margin-bottom: 1.5rem;
+                     box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+    .eyebrow { color: var(--accent-color-3); font-weight: 600; letter-spacing: 0.04em;
+               text-transform: uppercase; font-size: 0.85rem; margin-bottom: 0.75rem; }
+    .requires { display: inline-block; margin-top: 1.5rem; padding: 0.75rem 1.25rem;
+                background: var(--faded-color-2); border-radius: 16px; font-size: 0.95rem;
+                color: var(--text-color-2); max-width: 640px; }
+    .step-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                 gap: 2rem; margin-top: 2rem; counter-reset: step; }
+    .step { counter-increment: step; }
+    .step h3::before { content: counter(step); display: inline-flex; align-items: center;
+                       justify-content: center; width: 1.9rem; height: 1.9rem; margin-right: 0.6rem;
+                       border-radius: 1.9rem; background: var(--accent-color-1);
+                       color: var(--background-color); font-size: 1rem; vertical-align: 2px; }
+    .syntax-table { margin-top: 1.5rem; border-collapse: collapse; width: 100%; max-width: 720px; }
+    .syntax-table td { padding: 0.45rem 1rem 0.45rem 0; vertical-align: top;
+                       border-bottom: 1px solid var(--faded-color-2); }
+    .syntax-table code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9rem;
+                         color: var(--accent-color-1); white-space: nowrap; }
+    .syntax-table td:last-child { color: var(--text-color-2); font-size: 0.95rem; }
+    .lede { font-size: 1.15rem; color: var(--text-color-2); max-width: 720px; }
+  </style>
+</head>
+<body>
+<header class="site-header">
+  <div class="container header-flex">
+    <a href="/" class="logo" aria-label="Clutch Labs home">
+      <img src="/img/logo.svg" class="logo-icon" />Clutch<span>Labs</span>
+    </a>
+    <nav class="nav-links" aria-label="Main navigation">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#privacy">Privacy</a>
+      <a href="/#contact" class="btn btn-calltoaction">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero section" aria-labelledby="hero-heading">
+    <div class="container">
+      <!-- 1024×1024 app icon, exported from Apps/Searchister/Application.icon -->
+      <img src="/img/searchister-icon.png" alt="" class="app-hero-icon">
+      <p class="eyebrow">iPhone · iPad · Mac</p>
+      <h1 id="hero-heading">Your Hister index, everywhere you look</h1>
+      <div class="hero-lead">
+        <p>Searchister is a native client for <strong>Hister</strong>, the self-hosted search
+        engine for everything you have read. Search your whole index from Spotlight, save pages
+        from any app, and keep a searchable copy on your device for when the connection is not
+        there.</p>
+      </div>
+      <div class="btn-row">
+        <a href="#" class="btn">Download on the App Store</a>
+        <a href="https://hister.org" class="btn btn-light">What is Hister? →</a>
+      </div>
+      <p class="requires"><strong>Searchister needs a Hister server of your own.</strong>
+      It hosts nothing, has no accounts, and has no index of its own to sell you — it is a window
+      onto the one you already run.</p>
+    </div>
+  </section>
+
+  <!-- Replace with real captures. See AppStore/screenshots.md for sizes and the shot list. -->
+  <div class="screenshots">
+    <figure class="screenshot screenshot-macos">
+      <img src="/img/searchister-mac.png" alt="Searchister on macOS, showing search results beside an open document">
+      <figcaption class="screenshot-label">Search results and the document, side by side</figcaption>
+    </figure>
+    <figure class="screenshot screenshot-ios">
+      <img src="/img/searchister-ios.png" alt="Searchister results appearing in iPhone Spotlight">
+      <figcaption class="screenshot-label">Your pages, in Spotlight</figcaption>
+    </figure>
+  </div>
+
+  <section id="features" class="section bg-soft" aria-labelledby="features-heading">
+    <div class="container">
+      <h2 id="features-heading">What it does</h2>
+      <p class="lede">Four things a browser bookmark cannot.</p>
+      <div class="service-grid">
+        <article class="service-card">
+          <h3>🔍 Find it in Spotlight</h3>
+          <p>Your saved pages turn up alongside everything else on your Mac or iPhone — matched on
+          what the page <em>says</em>, not just what it is called. Opening a result takes you
+          straight to the page in your browser.</p>
+        </article>
+        <article class="service-card">
+          <h3>✈️ Works offline</h3>
+          <p>A searchable copy of your index lives on the device: every title, address and label,
+          and the opening of every document's text. A search on a plane still answers. Full text
+          arrives as you open things.</p>
+        </article>
+        <article class="service-card">
+          <h3>📥 Save from anywhere</h3>
+          <p>The share sheet takes web pages, PDFs, Word documents, Markdown and plain text. Pages
+          are captured with their title and readable text rather than filed as a bare link.
+          Uploads queue and retry, so sharing works with no signal.</p>
+        </article>
+        <article class="service-card">
+          <h3>🗣️ Ask Siri</h3>
+          <p>“Search Hister for…” and “Save to Hister” are available to Siri and to the Shortcuts
+          app, so your index can be a step in an automation rather than a place you visit.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="section" aria-labelledby="how-heading">
+    <div class="container">
+      <h2 id="how-heading">How it works</h2>
+      <div class="step-grid">
+        <div class="step">
+          <h3>Run Hister</h3>
+          <p>On a machine you control — a home server, a NAS, a small VPS. Hister indexes the pages
+          you visit and the files you point it at. It is an independent, AGPL-licensed project, and
+          it is not ours.</p>
+        </div>
+        <div class="step">
+          <h3>Point Searchister at it</h3>
+          <p>Your server address and access token go in once. They are kept in the iCloud Keychain,
+          so entering them on one device sets up the rest.</p>
+        </div>
+        <div class="step">
+          <h3>Stop thinking about it</h3>
+          <p>The app keeps its copy of the index up to date in the background and publishes it to
+          Spotlight. From then on the thing you half-remember reading is where you would look for
+          it anyway.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section bg-soft" aria-labelledby="syntax-heading">
+    <div class="container side-by-side">
+      <div>
+        <h2 id="syntax-heading">The whole query language</h2>
+        <p class="lede">Hister's query syntax works as it does on the server — fields, phrases,
+        exclusions, alternatives, wildcards and sorting. A reference lives inside the app, so you
+        do not have to hold it in your head.</p>
+        <p class="lede" style="margin-top:1rem;font-size:0.95rem;">Offline, the cached copy handles
+        terms, phrases, negation and the <code>title:</code>, <code>domain:</code>, <code>url:</code>
+        and <code>label:</code> filters. Sorting, regular expressions and date filters need the
+        server.</p>
+      </div>
+      <div>
+        <table class="syntax-table">
+          <tr><td><code>domain:github.com</code></td><td>One domain</td></tr>
+          <tr><td><code>title:encryption</code></td><td>The title only</td></tr>
+          <tr><td><code>"privacy policy"</code></td><td>An exact phrase</td></tr>
+          <tr><td><code>privacy -facebook</code></td><td>Exclude a term</td></tr>
+          <tr><td><code>(vpn|proxy|tunnel)</code></td><td>Any one of these</td></tr>
+          <tr><td><code>label:reading</code></td><td>Your own labels</td></tr>
+          <tr><td><code>visits:10..</code></td><td>Read ten or more times</td></tr>
+          <tr><td><code>updated:&gt;90d</code></td><td>Untouched in 90 days</td></tr>
+          <tr><td><code>sort:date</code></td><td>Newest first</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy" class="section" aria-labelledby="privacy-heading">
+    <div class="container">
+      <h2 id="privacy-heading">What it doesn't do</h2>
+      <p class="lede">Searchister talks to exactly one server: yours. Everything below is a
+      statement about the shipping app, not an aspiration.</p>
+      <ul class="checklist">
+        <li>No analytics, telemetry or crash reporting</li>
+        <li>No accounts, and nothing to sign up for</li>
+        <li>No third-party SDKs of any kind</li>
+        <li>No advertising, and no advertising identifiers</li>
+        <li>No access to your files, contacts, location, photos or camera</li>
+        <li>Nothing is sent to us — there is nowhere for it to go</li>
+      </ul>
+      <p><a href="/searchister/privacy">Read the privacy policy →</a></p>
+    </div>
+  </section>
+
+  <section class="section bg-soft" aria-labelledby="support-heading">
+    <div class="container">
+      <h2 id="support-heading">Support Hister</h2>
+      <p class="lede">Searchister is a window onto somebody else's work. Hister is an independent,
+      AGPL-licensed project by Adam Tauber that does the actual indexing and searching, and it is
+      what makes this app worth having. Searchister is an unofficial client and is not affiliated
+      with the Hister project.</p>
+      <div class="btn-row" style="margin-top:1.5rem;">
+        <a href="https://hister.org/support" class="btn">Donate to Hister</a>
+        <a href="https://hister.org/docs" class="btn btn-light">Hister documentation →</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="container footer-flex">
+    <div>
+      <p><strong>Clutch Labs</strong> — Technology for the long haul.<br>
+      📍 Remote · serving nonprofits nationwide</p>
+    </div>
+    <div>
+      <p>📧 <a href="mailto:hello@clutchlabs.app" style="color: #1f3b4c; font-weight: 500;">hello@clutchlabs.app</a><br>
+      <p style="margin-top: 0.5rem; font-size: 0.8rem;">© 2026 Clutch Labs — all content reflects real-world experience.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

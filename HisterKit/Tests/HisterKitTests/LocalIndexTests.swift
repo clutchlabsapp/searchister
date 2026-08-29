@@ -170,4 +170,19 @@ struct ExcerptTests {
     func shortTextUnchanged() {
         #expect(Excerpt.make(from: "brief") == "brief")
     }
+
+    /// The Spotlight index extension is handed a list of identifiers and has to answer for
+    /// exactly those, so the lookup has to take a set of URLs rather than one at a time.
+    @Test("documents can be fetched by a list of URLs")
+    func fetchByURLs() throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let urls = (0..<5).map { "https://example.com/\($0)" }
+        try index.upsert(urls.map { CachedDocument(document: makeDocument(url: $0)) })
+
+        let found = try index.documents(urls: [urls[0], urls[4], "https://example.com/absent"])
+        #expect(found.map(\.url).sorted() == [urls[0], urls[4]].sorted())
+        #expect(try index.documents(urls: []).isEmpty)
+    }
 }

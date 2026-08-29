@@ -44,6 +44,15 @@ struct SearchisterApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command])
             }
+            // Command-F, where every Mac user reaches for "find something here". The app has no
+            // in-page find of its own, so the shortcut is free and the search field is the honest
+            // answer to it. iPadOS builds the same command into its hardware-keyboard shortcuts.
+            CommandGroup(after: .textEditing) {
+                Button("Find") {
+                    model.focusSearch()
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+            }
         }
 
         #if os(macOS)

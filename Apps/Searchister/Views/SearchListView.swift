@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SearchListView: View {
     @Environment(SearchModel.self) private var model
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -35,6 +36,10 @@ struct SearchListView: View {
         }
         .listStyle(.inset)
         .searchable(text: $model.query, prompt: "Search your index")
+        .searchFocused($isSearchFocused)
+        // Command-F comes in through the menu, which has no way to reach this view's focus state,
+        // so the model carries the request across.
+        .onChange(of: model.focusSearchToken) { _, _ in isSearchFocused = true }
         .onChange(of: model.query) { _, _ in model.queryChanged() }
         .refreshable { await model.refreshNewDocuments() }
         .overlay {
@@ -152,28 +157,27 @@ private struct EmptyStateView: View {
     var body: some View {
         ContentUnavailableView {
             Label(
-                isConfigured
-                    ? (model.query.isEmpty ? "Nothing cached yet" : "No matches")
-                    : "Connect to your Hister server",
-                systemImage: isConfigured ? "magnifyingglass" : "server.rack"
+                model.query.isEmpty ? "Nothing cached yet" : "No matches",
+                systemImage: model.query.isEmpty ? "square.stack.3d.up.slash" : "magnifyingglass"
             )
         } description: {
-            if !isConfigured {
-                Text("Add your server address and access token to start searching your index.")
+            if model.query.isEmpty && !isConfigured {
+                // Before setup the app is reading the public demo, so "connect your server first"
+                // would be untrue — there is an index here, it is just not theirs.
+                Text("Syncing the Hister demo server, so there is something to search. Add your own server in Settings to search your own index.")
             } else if model.query.isEmpty {
                 Text("Sync to copy a searchable version of your index onto this device.")
             } else {
                 Text("Nothing in the index matches that query.")
             }
         } actions: {
-            if !isConfigured {
-                // The primary action when nothing is set up: without it the only route to Settings
-                // is a toolbar icon, which is not where someone looks on first launch.
-                Button("Open Settings") { showSettings() }
-                    .buttonStyle(.borderedProminent)
-            } else if model.query.isEmpty {
+            if model.query.isEmpty {
                 Button("Sync Now") { Task { await model.refreshNewDocuments() } }
                     .buttonStyle(.borderedProminent)
+            }
+            if !isConfigured {
+                Button("Open Settings") { showSettings() }
+                    .buttonStyle(model.query.isEmpty ? .bordered : .borderedProminent)
             }
         }
     }
@@ -220,6 +224,13 @@ private struct StatusBar: View {
             if model.pendingUploads > 0 {
                 Spacer()
                 Label("\(model.pendingUploads) queued", systemImage: "arrow.up.circle")
+            }
+
+            // Results from someone else's public server must never be mistaken for the user's own
+            // index, so this stays visible for as long as that is what they are looking at.
+            if AppServices.shared.isUsingDemoServer {
+                Spacer()
+                Label("Demo server", systemImage: "info.circle")
             }
         }
         .font(.caption)

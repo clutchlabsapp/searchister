@@ -28,6 +28,15 @@ struct LabelsTests {
         #expect(Labels.adding("ops", to: ["Ops"]) == ["Ops"])
     }
 
+    /// New labels are lowercased, so "Reading" and "reading" cannot both accumulate. Labels
+    /// already stored on the server keep the case they were given.
+    @Test("a newly added label is lowercased")
+    func addingLowercases() {
+        #expect(Labels.adding("Read Later", to: []) == ["read later"])
+        #expect(Labels.adding("  OPS  ", to: []) == ["ops"])
+        #expect(Labels.parse("Ops, Read Later") == ["Ops", "Read Later"])
+    }
+
     @Test("adding ignores blanks")
     func addingBlanks() {
         #expect(Labels.adding("   ", to: ["a"]) == ["a"])

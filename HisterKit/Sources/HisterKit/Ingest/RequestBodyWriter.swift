@@ -21,7 +21,9 @@ public enum RequestBodyWriter {
         pdfURL: URL,
         to destinationURL: URL
     ) throws {
-        FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
+        // The return value says whether the file was created; the open below is the check that
+        // actually matters, and it reports the failure properly.
+        _ = FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: destinationURL) else {
             throw HisterError.unreadableAttachment(destinationURL.lastPathComponent)
         }

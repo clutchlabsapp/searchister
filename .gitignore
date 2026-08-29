@@ -14,6 +14,16 @@ build/
 .build/
 .swiftpm/
 
+# Sources copied in by Scripts/linux-check.sh. Only the package manifest and the stubs are
+# committed; everything else there is a copy of HisterKit and is rewritten on every run.
+Scripts/LinuxCheck/Sources/
+Scripts/LinuxCheck/Tests/
+Scripts/LinuxCheck/Package.resolved
+
+# Resolved by a bare `swift build` inside the package. Xcode resolves the app's dependencies
+# through the project workspace, which is what actually pins them; a second file here only drifts.
+HisterKit/Package.resolved
+
 # macOS
 .DS_Store
 

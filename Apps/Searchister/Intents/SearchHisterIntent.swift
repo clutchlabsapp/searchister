@@ -32,8 +32,10 @@ struct SearchHisterIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<[HisterDocumentEntity]> & ProvidesDialog {
-        let services = AppServices.shared
-        guard services.isConfigured, let search = services.search else {
+        // Searching does not require the user's own server — reading works against the demo, and
+        // against whatever is already cached — so this asks only that the app has an index to
+        // search, not that setup is finished. Saving is the operation that needs a real server.
+        guard let search = AppServices.shared.search else {
             throw HisterIntentError.notConfigured
         }
 

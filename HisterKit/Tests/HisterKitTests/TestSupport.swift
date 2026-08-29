@@ -89,6 +89,12 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
         if query.matchAll == true, !corpus.isEmpty {
             return serveSearchPage(query)
         }
+        if query.text.hasPrefix("domain:"), !corpus.isEmpty {
+            let domain = query.text
+                .dropFirst("domain:".count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            return serveSearchPage(query, over: corpus.filter { $0.domain == domain })
+        }
         if query.text.hasPrefix("url:") {
             let url = query.text
                 .dropFirst("url:".count)
@@ -112,7 +118,11 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     /// Serves the corpus the way `/search` does: newest first, `date_from` inclusive, `page_key`
     /// present only on a full page.
     private func serveSearchPage(_ query: HisterQuery) -> HisterResults {
-        let matching = corpus
+        serveSearchPage(query, over: corpus)
+    }
+
+    private func serveSearchPage(_ query: HisterQuery, over documents: [HisterDocument]) -> HisterResults {
+        let matching = documents
             .filter { document in
                 guard let from = query.dateFrom, from != 0 else { return true }
                 return (document.updated ?? 0) >= from
@@ -167,22 +177,46 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
         HisterFacets(terms: [HisterClient.domainFacetName: HisterTermFacet(terms: facetDomains, other: 0)])
     }
 
+    /// Makes every `/api/history` and `/api/batch` call answer 401, which is what a Hister server
+    /// does for a client with no access token — `/search` stays readable on a public instance.
+    var authenticatedEndpointsRefused = false
+
     func history(
         cursor: String?,
         since: Int64?,
         until: Int64?,
         filter: String?
     ) async throws -> HisterHistoryPage {
+        if authenticatedEndpointsRefused { throw HisterError.unauthorized(detail: "no token") }
         recordedFilters.append(filter)
         recordedHistoryCursors.append(cursor)
         recordedHistorySince.append(since)
         recordedHistoryUntil.append(until)
 
         guard corpus.isEmpty else {
-            return servePage(cursor: cursor, since: since, until: until, filter: filter)
+            let page = servePage(cursor: cursor, since: since, until: until, filter: filter)
+            return HisterHistoryPage(
+                documents: page.documents.map(Self.asHistoryDocument),
+                pageKey: page.pageKey
+            )
         }
         if let page = historyWindows[until], cursor == nil { return page }
         return historyPages[cursor] ?? HisterHistoryPage(documents: [])
+    }
+
+    /// `/api/history` as the server actually sends it. Two things matter and both have bitten:
+    /// the handler asks bleve for six fields, so text, domain, label and language are never
+    /// populated — and `document.Document` declares them without `omitempty`, so they go out as
+    /// `""` rather than being omitted. A client that reads those at face value blanks whatever
+    /// the search pass cached.
+    private static func asHistoryDocument(_ document: HisterDocument) -> HisterDocument {
+        var stripped = document
+        stripped.text = ""
+        stripped.domain = ""
+        stripped.label = ""
+        stripped.language = ""
+        stripped.html = ""
+        return stripped
     }
 
     private func servePage(
@@ -231,6 +265,7 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
     var batchReturnsNothing = false
 
     func batchGet(urls: [String]) async throws -> [HisterClient.BatchGetResult] {
+        if authenticatedEndpointsRefused { throw HisterError.unauthorized(detail: "no token") }
         recordedBatchURLs.append(urls)
         return urls.map { url in
             if batchReturnsNothing {

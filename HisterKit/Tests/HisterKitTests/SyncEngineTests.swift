@@ -52,6 +52,102 @@ struct SyncEngineTests {
         #expect(hits.count == 5)
     }
 
+    /// Hister exempts only its `Public` endpoints from authentication, and `/api/history` and
+    /// `/api/batch` are not among them — so a client with no token, which is what the built-in
+    /// demo server is, is refused by every backstop walk while `/search` keeps working. That has
+    /// to be a complete sync, not a failed one.
+    @Test("a sync completes when only the public endpoints are readable")
+    func syncSurvivesUnauthenticatedBackstops() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<4).map {
+            makeDocument(url: "https://example.com/\($0)", text: "body \($0)", updated: Int64(1_000 + $0))
+        }
+        api.authenticatedEndpointsRefused = true
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.documentCount() == 4)
+        #expect(try index.countWithText() == 4)
+    }
+
+    /// But a refusal with nothing enumerated is a real failure — the token is wrong, or the
+    /// server is not public — and swallowing it would leave an empty cache looking healthy.
+    @Test("a sync that reaches nothing at all still fails")
+    func syncFailsWhenNothingIsReadable() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.authenticatedEndpointsRefused = true
+
+        let engine = SyncEngine(client: api, index: index)
+        await #expect(throws: HisterError.self) {
+            _ = try await engine.sync()
+        }
+    }
+
+    /// The fault that left a fully enumerated cache recorded as having no text at all.
+    /// `document.Document` has no `omitempty`, so `/api/history` sends `"text": ""`,
+    /// `"domain": ""` and `"label": ""` for every document even though it populates none of
+    /// them — and each metadata walk overwrote what the search pass had just cached with those
+    /// empty values.
+    @Test("a metadata walk does not blank the text, domain or labels a search pass cached")
+    func metadataWalksDoNotBlankSearchResults() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let api = FakeHisterAPI()
+        api.corpus = (0..<3).map { i in
+            var document = makeDocument(
+                url: "https://example.com/\(i)",
+                text: "Pascal wrote about \(i)",
+                domain: "example.com",
+                label: "reading",
+                updated: Int64(1_000 + i)
+            )
+            document.language = "en"
+            return document
+        }
+        api.statsCount = 3
+        api.facetDomains = [HisterTermCount(term: "example.com", count: 3)]
+
+        let engine = SyncEngine(client: api, index: index)
+        _ = try await engine.sync()
+
+        #expect(try index.countWithText() == 3)
+        #expect(try index.countWithoutText() == 0)
+
+        let row = try #require(try index.document(url: "https://example.com/0"))
+        #expect(row.excerpt == "Pascal wrote about 0")
+        #expect(row.domain == "example.com")
+        #expect(row.label == "reading")
+        #expect(row.language == "en")
+
+        let (hits, _) = try index.search("pascal")
+        #expect(hits.count == 3)
+    }
+
+    /// Clearing a label has to still work: the rule that an empty value means "not supplied"
+    /// applies to documents coming back from the server, not to a row the app writes itself.
+    @Test("clearing a label locally is not undone by the preserve rule")
+    func clearingALabelSticks() async throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        let url = "https://example.com/1"
+        try index.upsert([CachedDocument(document: makeDocument(url: url, label: "reading"))])
+
+        var row = try #require(try index.document(url: url))
+        row.label = ""
+        try index.upsert([row])
+
+        #expect(try index.document(url: url)?.label == "")
+    }
+
     /// `/api/batch` resolves a URL to a document ID built from the caller's user id, so it 404s
     /// every URL when the documents belong to a real user and the client authenticates with a
     /// token. A 404 there is therefore not evidence the document has no text — a `url:` search,
@@ -127,7 +223,11 @@ struct SyncEngineTests {
         #expect(api.recordedBatchURLs.isEmpty)
     }
 
-    @Test("seed follows the history cursor until the pages run out")
+    /// The date window narrows by `oldest + 1`, never by `oldest`, because the server's `date_to`
+    /// is exclusive — `NewNumericRangeInclusiveQuery(min, max, true, false)`. Bounding at `oldest`
+    /// drops every remaining document stamped with that exact second. The window keys below are
+    /// the bounds a correct walk asks for.
+    @Test("the seed narrows date_to past the oldest document it saw")
     func seedPaginates() async throws {
         let (index, cleanup) = try LocalIndex.temporary()
         defer { cleanup() }
@@ -139,23 +239,25 @@ struct SyncEngineTests {
                 makeDocument(url: "https://example.com/1", title: "One", updated: 300),
                 makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
             ]),
-            200: page([
+            201: page([
                 makeDocument(url: "https://example.com/2", title: "Two", updated: 200),
                 makeDocument(url: "https://example.com/3", title: "Three", updated: 100),
             ]),
-            100: page([makeDocument(url: "https://example.com/3", title: "Three", updated: 100)]),
+            101: page([makeDocument(url: "https://example.com/3", title: "Three", updated: 100)]),
         ]
 
         let engine = SyncEngine(client: api, index: index)
-        let report = try await engine.sync()
+        _ = try await engine.sync()
 
-        #expect(report.upserted == 3)
+        // Three distinct documents. The passes overlap by design, so the number of rows *written*
+        // is higher and is not what this is about.
         #expect(try index.documentCount() == 3)
         #expect(try index.syncValue(.seedComplete) == "1")
         #expect(try index.syncValue(.seedPageKey) == nil)
         #expect(try index.syncValue(.lastSyncedUpdated) == "300")
-        // Paged by narrowing date_to rather than by following the cursor.
-        #expect(api.recordedHistoryUntil.prefix(3) == [nil, 200, 100])
+        // Paged by narrowing date_to rather than by following the cursor, and each bound is one
+        // second past the oldest document of the previous page.
+        #expect(api.recordedHistoryUntil.prefix(3) == [nil, 201, 101])
     }
 
     /// A walk that comes up short must never be read as "the server deleted everything it did

@@ -111,6 +111,12 @@ Details worth knowing if you touch this code:
   real user *every* such lookup answers 404 — for documents the same instance returns happily from
   a search. So a 404 from a batch `get` is checked against a `url:` search before the document is
   recorded as having no text.
+- **Every string field comes back as `""` rather than being omitted.** `document.Document`
+  declares them without `omitempty`, so `/api/history` — which populates only url, title and the
+  timestamps — still sends `"text": ""`, `"domain": ""` and `"label": ""`. Read at face value,
+  each metadata walk overwrites what the search pass cached, and a fully enumerated index ends up
+  recorded as having no body text. An empty string from the server means "not supplied": `upsert`
+  keeps what it already holds wherever a field arrives empty.
 - **A search response's `history` block holds real results.** `doSearch` does not annotate a hit
   the user has opened for that query before; it moves it out of `documents` and re-emits it under
   `history`. Read only `documents` and you drop exactly the pages the user returns to most.
@@ -122,6 +128,86 @@ Details worth knowing if you touch this code:
   name (a URL there is ignored and every page repeats the first), and it parses `date_from` as a
   Unix timestamp while `/search`'s query-string form wants `YYYY-MM-DD` (the JSON `query` object
   takes a timestamp).
+
+## Around the app
+
+Command-F puts the cursor in the search field, on macOS and on iPadOS with a hardware keyboard.
+Command-R syncs.
+
+The detail pane, when nothing is selected, carries a link to
+[Hister's donation page](https://hister.org/support) and a short reference for the query language —
+the fields, phrases, negation, alternation, wildcards and `sort:` directives the server supports,
+with a note on which of them the offline cache can honour. There is a second donation link at the
+top of Settings.
+
+New labels are lowercased as they are created. Labels already on the server keep the case they were
+given; rewriting those is the user's call, not a side effect of opening a document.
+
+## The demo server
+
+With nothing saved, `CredentialsStore.credentials()` returns `HisterCredentials.demo` —
+`https://demo.hister.org`, with no access token — so a fresh install has an index to search rather
+than an empty screen and a form. Saving a server replaces it; clearing one brings it back.
+
+The empty token is not an oversight, it is the mechanism. Hister exempts only its `Public`
+endpoints from authentication when the instance runs in public mode, and every write is outside
+that set, so a token-less client is read-only *at the server*, not merely by convention here. What
+it can reach: `/search`, `/api/config`, `/api/facets`, `/api/document`, `/api/stats`. What it
+cannot: `/api/history`, `/api/batch`, and every write.
+
+Three consequences worth knowing before changing any of this:
+
+- **Sync still works, on the search pass alone.** The match-all `/search` enumeration carries each
+  document's text, so it needs none of the authenticated endpoints. The three `/api/history`
+  backstops are skipped when the server refuses them *and* the search pass reached something; if
+  it reached nothing, that is a real failure and still throws.
+- **Nothing is uploaded to it.** `OutboxUploader` and the share extension ask
+  `storedCredentials()`, not `credentials()`, so a queued page waits for the user's own server
+  rather than being pushed to a public one they did not choose. Reads use `credentials()`; writes
+  use `storedCredentials()`, and that split is the whole safety property.
+- **The UI says so, in four places** — the status bar, the empty state, the detail pane and
+  Settings. Results from a stranger's server must never be mistaken for the user's own reading,
+  and that is the only thing making this defensible rather than merely convenient.
+
+## Why there is a Spotlight index extension
+
+`Apps/SpotlightIndexExtension` exists to answer a question the app cannot hear.
+
+Each cached row carries a `spotlight_synced_at` marker meaning "Spotlight already has the current
+version of this". Nothing clears that marker when the *system* discards the index it was published
+into — after an OS index rebuild, a device migration, or a restore from backup. The rows stay
+marked, the app republishes nothing, and the entire index quietly stops appearing in Spotlight
+until someone thinks to rebuild the cache by hand.
+
+Registering an extension at `com.apple.corespotlight.index` is the only way to be told it
+happened. The system launches it with no app running and asks for either everything
+(`reindexAll()`) or specific identifiers (`reindex(identifiers:)`); both are served entirely from
+the shared database, so the extension needs neither the network nor the Keychain — its
+entitlements are the App Group and nothing else.
+
+Both paths are safe to be killed halfway. A full reindex clears every per-row marker *before*
+publishing, and an identifier reindex marks rows only once Spotlight has accepted them, so
+whatever the extension does not finish is left looking unpublished and the app's next ordinary
+sync completes it.
+
+## Checking changes without a Mac
+
+`Scripts/linux-check.sh` compiles and tests the portable part of `HisterKit` against a Linux Swift
+toolchain — the client, the local index, sync and search, which is where nearly all the logic is.
+Nothing in `Apps/` is checkable this way, the index extension included. Six library files cannot
+build there either (`KeychainStore` needs Security, `SpotlightIndexer` CoreSpotlight,
+`DocumentExtractor` UIKit, `PageFetcher` the CoreFoundation charset APIs, `OutboxUploader` a
+background `URLSession`, and `IngestService` depends on those); `KeychainStore` and `AppGroup` are
+replaced by stubs with identical signatures so everything downstream still typechecks against the
+API it meets on a Mac.
+
+```sh
+Scripts/linux-check.sh test    # or: build
+```
+
+Sources are copied into `Scripts/LinuxCheck` and patched there — `URLRequest` and `XMLParser` live
+in separate modules on Linux — so the committed sources keep Apple-shaped imports. It is a fast
+correctness check, not a substitute for building the app: nothing in `Apps/` is checkable this way.
 
 ## What the offline cache holds
 

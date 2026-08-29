@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2752" height="2064" viewBox="0 0 2752 2064">
+  <title>The query syntax reference</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12151b"/>
+      <stop offset="1" stop-color="#1b2029"/>
+    </linearGradient>
+  </defs>
+  <rect width="2752" height="2064" fill="url(#bg)"/>
+  <rect x="144.48000000000002" y="144.48000000000002" width="2463" height="1775"
+        rx="58" fill="none" stroke="#3a4353" stroke-width="6"
+        stroke-dasharray="37 29"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif"
+     text-anchor="middle">
+    <text x="1376" y="722" fill="#5d6b82"
+          font-size="70" letter-spacing="12.4">PLACEHOLDER 05 OF 8</text>
+    <text x="1376" y="908" fill="#e8ecf3"
+          font-size="128" font-weight="600">The query syntax reference</text>
+    <text x="1376" y="1053" fill="#8e9bb0"
+          font-size="70">The empty detail pane, scrolled to the syntax table.</text>
+    <text x="1376" y="1280" fill="#c8d2e2"
+          font-size="83" font-style="italic">caption: “The full Hister query language”</text>
+    <text x="1376" y="1783" fill="#5d6b82"
+          font-size="66">iPad 13″ · landscape</text>
+    <text x="1376" y="1874" fill="#46506180"
+          font-size="62" font-family="ui-monospace, Menlo, monospace">2752 × 2064</text>
+  </g>
+</svg>

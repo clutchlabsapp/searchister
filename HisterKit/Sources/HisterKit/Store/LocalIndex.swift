@@ -148,10 +148,19 @@ public struct LocalIndex: Sendable {
 
     /// Inserts or updates cached rows.
     ///
-    /// Sync writes documents twice: once as metadata from `/api/history`, which carries no text,
-    /// and again with text from `/api/batch`. So a row arriving without text must not blank out
-    /// text that is already cached — unless the document actually changed, in which case the
-    /// cached text is stale and is dropped so the enrichment pass fetches it again.
+    /// The same document is written several times per sync from endpoints that disagree about
+    /// how much of it they return: a match-all `/search` page carries the text, domain and
+    /// labels, while `/api/history` carries url, title and timestamps and nothing else. A field
+    /// that arrives nil therefore means "this response did not cover it", so the cached value
+    /// stands — the alternative is that whichever walk ran last decides what the cache holds,
+    /// which is how a fully populated index came to be recorded as having no text at all.
+    ///
+    /// Text is the one field with a second rule: if the document itself changed, the cached text
+    /// is stale, so it is dropped rather than kept and the enrichment pass fetches it again.
+    ///
+    /// The cost of the rule is that a value cleared on the server — a label removed through the
+    /// web UI, say — is not cleared here until that document's `updated` moves. Clearing a label
+    /// in this app writes the row directly, so it does not go through this path.
     public func upsert(_ documents: [CachedDocument]) throws {
         guard !documents.isEmpty else { return }
         try dbPool.write { db in
@@ -165,6 +174,13 @@ public struct LocalIndex: Sendable {
                     if row.fullText == nil {
                         row.fullText = unchanged ? existing.fullText : nil
                     }
+                    row.title = row.title ?? existing.title
+                    row.domain = row.domain ?? existing.domain
+                    row.label = row.label ?? existing.label
+                    row.language = row.language ?? existing.language
+                    row.faviconKey = row.faviconKey ?? existing.faviconKey
+                    row.type = row.type ?? existing.type
+                    row.added = row.added ?? existing.added
                     // Keep the row's Spotlight state unless what Spotlight indexes actually
                     // changed. A full check re-writes every row, and clearing it blindly would
                     // republish the entire index on every pass.
@@ -186,6 +202,17 @@ public struct LocalIndex: Sendable {
             && lhs.domain == rhs.domain
             && lhs.language == rhs.language
             && lhs.updated == rhs.updated
+    }
+
+    /// Fetches specific rows by URL.
+    ///
+    /// Used by the Spotlight index extension, which is handed a list of identifiers by the system
+    /// and has to answer for exactly those.
+    public func documents(urls: [String]) throws -> [CachedDocument] {
+        guard !urls.isEmpty else { return [] }
+        return try dbPool.read { db in
+            try CachedDocument.filter(urls.contains(Column("url"))).fetchAll(db)
+        }
     }
 
     /// Rows that still need publishing to Spotlight, newest first.
