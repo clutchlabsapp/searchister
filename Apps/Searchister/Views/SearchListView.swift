@@ -171,13 +171,19 @@ private struct EmptyStateView: View {
                 Text("Nothing in the index matches that query.")
             }
         } actions: {
+            // Written out twice rather than picking a style with a ternary: button styles are
+            // distinct types, so the two branches have nothing in common to infer.
             if model.query.isEmpty {
                 Button("Sync Now") { Task { await model.refreshNewDocuments() } }
                     .buttonStyle(.borderedProminent)
-            }
-            if !isConfigured {
+                if !isConfigured {
+                    // Secondary here. What an unfilled cache needs first is the sync.
+                    Button("Open Settings") { showSettings() }
+                        .buttonStyle(.bordered)
+                }
+            } else if !isConfigured {
                 Button("Open Settings") { showSettings() }
-                    .buttonStyle(model.query.isEmpty ? .bordered : .borderedProminent)
+                    .buttonStyle(.borderedProminent)
             }
         }
     }
