@@ -2,6 +2,24 @@ import HisterKit
 import SwiftUI
 
 struct SettingsView: View {
+    /// A phase in one line. The status bar renders the same states with its own layout; this is
+    /// the short form, for a window where progress is context rather than the point.
+    static func describe(_ phase: SyncPhase) -> String {
+        switch phase {
+        case .idle: return "Starting…"
+        case .seeding(let fetched, let total):
+            return total.map { "Caching \(fetched) of \($0)…" } ?? "Caching \(fetched)…"
+        case .updating(let fetched): return "Updating (\(fetched))…"
+        case .enriching(let done, let remaining):
+            return remaining > 0 ? "Fetching text — \(done) done, \(remaining) to go…"
+                                 : "Fetching text (\(done))…"
+        case .reconciling(let checked):
+            return checked > 0 ? "Checking all \(checked) documents…" : "Checking the full index…"
+        case .failed(let message): return message
+        case .finished: return "Finished"
+        }
+    }
+
     @Environment(SearchModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
@@ -85,11 +103,26 @@ struct SettingsView: View {
                 )
                 LabeledContent("Queued uploads", value: "\(model.pendingUploads)")
 
+                // The status bar that shows sync progress lives in the main window, so without
+                // this the Settings window is the one place with sync controls and no sign of
+                // whether they did anything.
+                if model.isSyncing {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(Self.describe(model.syncPhase))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
                 Button("Check for new documents") { Task { await model.refreshNewDocuments() } }
+                    .disabled(model.isSyncing)
 
                 Button("Check the whole index") { Task { await model.fullCheck() } }
+                    .disabled(model.isSyncing)
 
                 Button("Refetch missing text") { Task { await model.refetchMissingText() } }
+                    .disabled(model.isSyncing)
 
                 Text("A full check re-reads every document on the server to pick up deletions and anything an earlier pass missed. It takes a while on a large index; checking for new documents is one or two requests. Refetching missing text asks again for every document recorded as having none — use it if search is only matching titles.")
                     .font(.caption)
@@ -102,7 +135,7 @@ struct SettingsView: View {
                         isResyncing = false
                     }
                 }
-                .disabled(isResyncing)
+                .disabled(isResyncing || model.isSyncing)
 
                 Text("The cache holds each document's title, address and the first ~1,500 characters, which is what Spotlight and offline search use. Full text is fetched from the server as you open documents.")
                     .font(.caption)
@@ -144,6 +177,16 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(newURL.isEmpty)
+                }
+            }
+
+            // If the cache failed to open there is no sync to run and no search to do, and
+            // every control here is inert for a reason the app otherwise keeps to itself.
+            if let startupError = AppServices.shared.startupError {
+                Section("Problem") {
+                    Label(startupError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
                 }
             }
 
