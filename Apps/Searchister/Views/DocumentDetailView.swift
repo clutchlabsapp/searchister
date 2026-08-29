@@ -11,6 +11,9 @@ struct DocumentDetailView: View {
     @State private var isShowingExcerpt = false
     @State private var isConfirmingDelete = false
     @State private var isDeleting = false
+    @State private var isFinding = false
+    @State private var findNeedle = ""
+    @State private var findCurrent = 0
     @State private var labelDraft = ""
     @State private var labels: [String] = []
     @State private var error: String?
@@ -33,6 +36,7 @@ struct DocumentDetailView: View {
             }
         }
         .task(id: url) { await load() }
+        .onChange(of: model.findInPageToken) { _, _ in isFinding = true }
         .confirmationDialog(
             "Delete this document from Hister?",
             isPresented: $isConfirmingDelete,
@@ -47,9 +51,38 @@ struct DocumentDetailView: View {
         }
     }
 
+    /// Scroll target for one paragraph. Namespaced so it cannot collide with anything else the
+    /// detail view might one day want to scroll to.
+    static func paragraphID(_ index: Int) -> String { "body-paragraph-\(index)" }
+
+    /// Which match the find bar is on, clamped to what the text currently holds — the body can be
+    /// replaced under it when the full text arrives mid-search.
+    private func clampedMatch(in find: TextFinder) -> Int {
+        find.matches.isEmpty ? 0 : min(findCurrent, find.matches.count - 1)
+    }
+
     @ViewBuilder
     private func content(for document: CachedDocument) -> some View {
-        ScrollView {
+        let find = TextFinder(text: bodyText ?? "", needle: isFinding ? findNeedle : "")
+
+        ScrollViewReader { scroll in
+        VStack(spacing: 0) {
+            if isFinding {
+                FindInPageBar(
+                    needle: $findNeedle,
+                    current: $findCurrent,
+                    matchCount: find.matches.count,
+                    onDismiss: {
+                        isFinding = false
+                        findNeedle = ""
+                        findCurrent = 0
+                    }
+                )
+                .padding(.horizontal, 20)
+                .background(.bar)
+            }
+
+            ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(document.displayTitle)
@@ -70,6 +103,14 @@ struct DocumentDetailView: View {
                             Label("Open original", systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.bordered)
+                    }
+
+                    if bodyText?.isEmpty == false {
+                        Button { isFinding = true } label: {
+                            Label("Find in page", systemImage: "text.magnifyingglass")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Find in page (⇧⌘F)")
                     }
 
                     Spacer()
@@ -125,8 +166,12 @@ struct DocumentDetailView: View {
 
                 if let bodyText, !bodyText.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(bodyText)
-                            .textSelection(.enabled)
+                        ForEach(Array(find.paragraphs.enumerated()), id: \.offset) { index, _ in
+                            Text(find.attributed(paragraph: index, current: clampedMatch(in: find)))
+                                .textSelection(.enabled)
+                                .id(Self.paragraphID(index))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
 
                         if isShowingExcerpt {
                             HStack(spacing: 6) {
@@ -159,7 +204,22 @@ struct DocumentDetailView: View {
             }
             .frame(maxWidth: 720, alignment: .leading)
             .padding(20)
+            }
         }
+        // Bringing the paragraph into view is the whole reason the body is rendered as
+        // paragraphs rather than one Text: SwiftUI cannot scroll to a range inside a Text.
+        .onChange(of: findCurrent) { _, _ in scrollToMatch(find, using: scroll) }
+        .onChange(of: findNeedle) { _, _ in
+            findCurrent = 0
+            scrollToMatch(find, using: scroll)
+        }
+        }
+    }
+
+    private func scrollToMatch(_ find: TextFinder, using scroll: ScrollViewProxy) {
+        guard !find.matches.isEmpty else { return }
+        let match = find.matches[clampedMatch(in: find)]
+        withAnimation { scroll.scrollTo(Self.paragraphID(match.paragraph), anchor: .center) }
     }
 
     private func load() async {

@@ -23,6 +23,11 @@ final class SearchModel {
     var failedUploads: [OutboxItem] = []
     var errorMessage: String?
 
+    /// Parts of the query the offline index could not honour, when the answer came from the
+    /// cache. Reporting them is the difference between "these are your results" and "these are
+    /// your results, minus the bit of your query we quietly ignored".
+    var droppedDirectives: [String] = []
+
     /// Bumped to ask the search field to take focus. A counter rather than a flag so two Cmd-F
     /// presses in a row both register — the view watches for a change, and a flag that is already
     /// true does not change.
@@ -32,6 +37,19 @@ final class SearchModel {
     /// menu and so cannot reach the field's focus state directly.
     func focusSearch() {
         focusSearchToken += 1
+    }
+
+    /// Bumped to open the find bar over the document being read. Same counter trick as
+    /// `focusSearchToken`, and for the same reason.
+    var findInPageToken = 0
+
+    /// Opens find-in-page on the open document.
+    ///
+    /// Command-F is the index search, because that is what was asked for and it is the more
+    /// common action here; this takes Command-Shift-F. The two are genuinely different searches —
+    /// one queries the server's index, the other looks through the characters of one document.
+    func findInPage() {
+        findInPageToken += 1
     }
 
     private var searchTask: Task<Void, Never>?
@@ -105,6 +123,11 @@ final class SearchModel {
         hits = outcome.hits
         total = outcome.total
         suggestion = outcome.suggestion
+        if case .cache(let unsupported) = outcome.source {
+            droppedDirectives = unsupported
+        } else {
+            droppedDirectives = []
+        }
     }
 
     /// Drops a document the user deleted from the on-screen list and the selection, so the UI

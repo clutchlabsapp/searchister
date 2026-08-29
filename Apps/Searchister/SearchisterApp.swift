@@ -52,6 +52,11 @@ struct SearchisterApp: App {
                     model.focusSearch()
                 }
                 .keyboardShortcut("f", modifiers: [.command])
+
+                Button("Find in Page") {
+                    model.findInPage()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
         }
 

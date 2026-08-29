@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import GRDB
 @testable import HisterKit
 
 @Suite("LocalIndex")
@@ -184,5 +185,212 @@ struct ExcerptTests {
         let found = try index.documents(urls: [urls[0], urls[4], "https://example.com/absent"])
         #expect(found.map(\.url).sorted() == [urls[0], urls[4]].sorted())
         #expect(try index.documents(urls: []).isEmpty)
+    }
+
+    // MARK: - Query language, end to end
+
+    /// The translator's own tests assert the FTS5 *string*. These assert SQLite accepts it and
+    /// returns the right rows — which is the part that matters, because an expression FTS5
+    /// rejects surfaces as a thrown error and one it misreads surfaces as an empty result set.
+    private func indexWithCorpus() throws -> (LocalIndex, () -> Void) {
+        let (index, cleanup) = try LocalIndex.temporary()
+        try index.upsert([
+            CachedDocument(
+                url: "https://github.com/a/security",
+                title: "Threat modelling",
+                domain: "github.com",
+                label: "reading",
+                language: "en",
+                excerpt: "Pascal wrote about encryption and privacy."
+            ),
+            CachedDocument(
+                url: "https://gitlab.com/b/tutorial",
+                title: "A VPN tutorial",
+                domain: "gitlab.com",
+                label: "later",
+                language: "en",
+                excerpt: "Setting up a proxy for privacy."
+            ),
+            CachedDocument(
+                url: "https://example.com/c/notes",
+                title: "Notes",
+                domain: "example.com",
+                label: "reading",
+                language: "de",
+                excerpt: "Nothing to do with the others."
+            ),
+        ])
+        return (index, cleanup)
+    }
+
+    @Test(
+        "the translated query language runs against FTS5 and selects the right rows",
+        arguments: [
+            ("title:encryption", [String]()),
+            ("title:modelling", ["https://github.com/a/security"]),
+            ("text:pascal", ["https://github.com/a/security"]),
+            ("domain:gitlab.com", ["https://gitlab.com/b/tutorial"]),
+            ("label:reading", ["https://github.com/a/security", "https://example.com/c/notes"]),
+            ("language:de", ["https://example.com/c/notes"]),
+            ("privacy -domain:gitlab.com", ["https://github.com/a/security"]),
+            ("(vpn|pascal)", ["https://github.com/a/security", "https://gitlab.com/b/tutorial"]),
+            ("domain:(github.com|gitlab.com) privacy",
+             ["https://github.com/a/security", "https://gitlab.com/b/tutorial"]),
+            ("privacy title:-tutorial", ["https://github.com/a/security"]),
+            ("priva*", ["https://github.com/a/security", "https://gitlab.com/b/tutorial"]),
+        ]
+    )
+    func queryLanguageEndToEnd(query: String, expected: [String]) throws {
+        let (index, cleanup) = try indexWithCorpus()
+        defer { cleanup() }
+
+        let (hits, unsupported) = try index.search(query)
+        #expect(unsupported.isEmpty, "\(query) reported \(unsupported)")
+        #expect(Set(hits.map(\.document.url)) == Set(expected), "\(query)")
+    }
+
+    /// A query the offline index cannot honour still runs its remaining terms, and says what it
+    /// dropped rather than presenting a narrower result set as the whole answer.
+    @Test("an unsupported directive is reported, and the rest of the query still runs")
+    func unsupportedDirectiveStillSearches() throws {
+        let (index, cleanup) = try indexWithCorpus()
+        defer { cleanup() }
+
+        let (hits, unsupported) = try index.search("privacy sort:date")
+        #expect(unsupported == ["sort:date"])
+        #expect(hits.count == 2)
+    }
+
+    // MARK: - Words versus phrases
+
+    /// The distinction quotes are *for*: unquoted words may appear anywhere in the document,
+    /// quoted words must appear together, in that order. The corpus is built so the two readings
+    /// give different answers — if quoting were being dropped, or if unquoted words were being
+    /// glued into a phrase, one of these expectations fails.
+    private func phraseCorpus() throws -> (LocalIndex, () -> Void) {
+        let (index, cleanup) = try LocalIndex.temporary()
+        try index.upsert([
+            CachedDocument(
+                url: "https://example.com/adjacent",
+                title: "Terms",
+                excerpt: "Our privacy policy is short."
+            ),
+            CachedDocument(
+                url: "https://example.com/scattered",
+                title: "Notes",
+                // Both words, far apart and in the other order.
+                excerpt: "Our policy is simple, and we care about privacy."
+            ),
+            CachedDocument(
+                url: "https://example.com/neither",
+                title: "Unrelated",
+                excerpt: "Nothing to do with either word."
+            ),
+        ])
+        return (index, cleanup)
+    }
+
+    @Test("a quoted phrase matches only where the words are adjacent and in order")
+    func quotedPhraseIsExact() throws {
+        let (index, cleanup) = try phraseCorpus()
+        defer { cleanup() }
+
+        let (hits, _) = try index.search("\"privacy policy\"")
+        #expect(hits.map(\.document.url) == ["https://example.com/adjacent"])
+    }
+
+    @Test("unquoted words match anywhere in the document, in any order")
+    func unquotedWordsAreIndependent() throws {
+        let (index, cleanup) = try phraseCorpus()
+        defer { cleanup() }
+
+        let (hits, _) = try index.search("privacy policy")
+        #expect(Set(hits.map(\.document.url)) == [
+            "https://example.com/adjacent",
+            "https://example.com/scattered",
+        ])
+    }
+
+    /// Unquoted words are an AND, not an OR: a document with only one of them is not a match.
+    @Test("unquoted words all have to be present")
+    func unquotedWordsAreConjunctive() throws {
+        let (index, cleanup) = try phraseCorpus()
+        defer { cleanup() }
+
+        let (hits, _) = try index.search("privacy unrelated")
+        #expect(hits.isEmpty)
+    }
+
+    /// Quoting inside a field has to survive too — this is the form `Labels.searchQuery(for:)`
+    /// generates, and a multi-word label would otherwise be split into two independent terms.
+    @Test("a quoted phrase inside a field stays a phrase")
+    func quotedPhraseInsideField() throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert([
+            CachedDocument(url: "https://example.com/a", title: "A", label: "read later"),
+            CachedDocument(url: "https://example.com/b", title: "B", label: "later read"),
+        ])
+
+        let (hits, _) = try index.search(Labels.searchQuery(for: "read later"))
+        #expect(hits.map(\.document.url) == ["https://example.com/a"])
+    }
+
+    /// A phrase spanning a word that is not there must not match, or "phrase" means nothing.
+    @Test("a phrase does not match when a word between them differs")
+    func phraseIsNotJustProximity() throws {
+        let (index, cleanup) = try LocalIndex.temporary()
+        defer { cleanup() }
+
+        try index.upsert([
+            CachedDocument(url: "https://example.com/a", excerpt: "the quick brown fox"),
+        ])
+
+        #expect(try index.search("\"quick brown\"").hits.count == 1)
+        #expect(try index.search("\"quick fox\"").hits.isEmpty)
+    }
+
+    /// The migration that added `language` to the full-text index rebuilds the FTS5 table, which
+    /// is the only way to add a column to one. Every other test starts from an empty database and
+    /// runs the migrations in one go; this one starts from a populated v3 cache, which is what a
+    /// user actually upgrades from, and checks the rebuilt index still holds their documents.
+    @Test("upgrading a populated cache rebuilds the full-text index without losing rows")
+    func migratesPopulatedCacheToV4() throws {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("cache.sqlite").path
+
+        // A cache as it stood before the language column existed.
+        do {
+            var configuration = Configuration()
+            configuration.prepareDatabase { db in
+                try db.execute(sql: "PRAGMA journal_mode = WAL")
+            }
+            let pool = try DatabasePool(path: path, configuration: configuration)
+            try LocalIndex.migrator.migrate(pool, upTo: "v3-spotlight-state")
+            try pool.write { db in
+                try db.execute(
+                    sql: """
+                        INSERT INTO documents (url, title, language, excerpt, synced_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                    arguments: ["https://example.com/a", "Vacuuming", "de", "Autovacuum reclaims tuples.", 0]
+                )
+            }
+            try pool.close()
+        }
+
+        // Reopening runs the remaining migrations, as a launch after an update would.
+        let index = try LocalIndex(path: path)
+
+        #expect(try index.documentCount() == 1)
+        // Searchable on a column that only exists in the index after the rebuild...
+        #expect(try index.search("language:de").hits.count == 1)
+        // ...and on one that was there before it, so the rebuild repopulated rather than emptied.
+        #expect(try index.search("autovacuum").hits.count == 1)
+        #expect(try index.search("title:vacuuming").hits.count == 1)
     }
 }

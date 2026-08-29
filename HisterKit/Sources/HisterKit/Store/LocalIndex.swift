@@ -17,6 +17,7 @@ public struct LocalIndex: Sendable {
         case url
         case domain
         case label
+        case language
         case excerpt
         case fullText
 
@@ -26,6 +27,7 @@ public struct LocalIndex: Sendable {
             case .url: return "url"
             case .domain: return "domain"
             case .label: return "label"
+            case .language: return "language"
             case .excerpt: return "excerpt"
             case .fullText: return "full_text"
             }
@@ -39,6 +41,9 @@ public struct LocalIndex: Sendable {
             case .url: return 3
             case .domain: return 2
             case .label: return 8
+            // Present so `language:en` can be honoured offline the way the server honours it.
+            // Weighted at nothing, because a language match is a filter, not relevance.
+            case .language: return 0
             case .excerpt: return 1
             case .fullText: return 1
             }
@@ -139,6 +144,23 @@ public struct LocalIndex: Sendable {
                 on: "documents",
                 columns: ["spotlight_synced_at"]
             )
+        }
+
+        migrator.registerMigration("v4-language-in-fts") { db in
+            // `language:en` is a documented Hister field and the cache has held the value all
+            // along — it just was not in the full-text index, so the translated query named a
+            // column FTS5 did not have and the whole search threw. Rebuilding the table is the
+            // only way to add a column to FTS5; the content table is untouched, and GRDB
+            // repopulates the index from it.
+            try db.dropFTS5SynchronizationTriggers(forTable: "documents_fts")
+            try db.drop(table: "documents_fts")
+            try db.create(virtualTable: "documents_fts", using: FTS5()) { t in
+                t.synchronize(withTable: "documents")
+                t.tokenizer = .porter(wrapping: .unicode61())
+                for column in FTSColumn.allCases {
+                    t.column(column.name)
+                }
+            }
         }
 
         return migrator
