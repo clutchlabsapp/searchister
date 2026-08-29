@@ -23,6 +23,11 @@ final class SearchModel {
     var failedUploads: [OutboxItem] = []
     var errorMessage: String?
 
+    /// Parts of the query the offline index could not honour, when the answer came from the
+    /// cache. Reporting them is the difference between "these are your results" and "these are
+    /// your results, minus the bit of your query we quietly ignored".
+    var droppedDirectives: [String] = []
+
     /// Bumped to ask the search field to take focus. A counter rather than a flag so two Cmd-F
     /// presses in a row both register — the view watches for a change, and a flag that is already
     /// true does not change.
@@ -34,8 +39,26 @@ final class SearchModel {
         focusSearchToken += 1
     }
 
+    /// Bumped to open the find bar over the document being read. Same counter trick as
+    /// `focusSearchToken`, and for the same reason.
+    var findInPageToken = 0
+
+    /// Opens find-in-page on the open document.
+    ///
+    /// Command-F is the index search, because that is what was asked for and it is the more
+    /// common action here; this takes Command-Shift-F. The two are genuinely different searches —
+    /// one queries the server's index, the other looks through the characters of one document.
+    func findInPage() {
+        findInPageToken += 1
+    }
+
     private var searchTask: Task<Void, Never>?
-    private var isSyncing = false
+    /// Whether a sync is in flight. Observable, and the reason is visibility: this used to be a
+    /// private flag that every sync control silently returned on, so a sync that never finished
+    /// left every button in Settings doing nothing at all, with no message and no way back short
+    /// of relaunching. The UI now shows it and disables on it, so "the button does nothing" is
+    /// not a state the app can reach without saying why.
+    private(set) var isSyncing = false
 
     /// First thing the window does. Shows whatever is already cached, then — if the app is
     /// configured — pulls in anything new, so a freshly installed or freshly configured app fills
@@ -100,6 +123,11 @@ final class SearchModel {
         hits = outcome.hits
         total = outcome.total
         suggestion = outcome.suggestion
+        if case .cache(let unsupported) = outcome.source {
+            droppedDirectives = unsupported
+        } else {
+            droppedDirectives = []
+        }
     }
 
     /// Drops a document the user deleted from the on-screen list and the selection, so the UI
@@ -139,12 +167,20 @@ final class SearchModel {
 
     func sync(scope: SyncEngine.SyncScope = .fullCheck) async {
         guard let engine = AppServices.shared.syncEngine() else {
-            errorMessage = "Add your Hister server URL and access token in Settings."
+            // The only way this fails now that credentials fall back to the demo is the cache
+            // itself failing to open, so say that rather than asking for a server they may
+            // already have set.
+            errorMessage = AppServices.shared.startupError
+                ?? "The local cache could not be opened, so there is nothing to sync into."
             return
         }
         // A window per screen on macOS, plus pull-to-refresh, plus the post-save trigger: all of
         // them can land at once, and two concurrent seeds would fight over the same cursor.
-        guard !isSyncing else { return }
+        guard !isSyncing else {
+            errorMessage = "A sync is already running. Wait for it to finish, or quit and reopen "
+                + "the app if it looks stuck."
+            return
+        }
         isSyncing = true
         defer { isSyncing = false }
 
@@ -162,8 +198,16 @@ final class SearchModel {
     }
 
     func resync() async {
-        guard let engine = AppServices.shared.syncEngine() else { return }
-        guard !isSyncing else { return }
+        guard let engine = AppServices.shared.syncEngine() else {
+            errorMessage = AppServices.shared.startupError
+                ?? "The local cache could not be opened, so there is nothing to sync into."
+            return
+        }
+        guard !isSyncing else {
+            errorMessage = "A sync is already running. Wait for it to finish, or quit and reopen "
+                + "the app if it looks stuck."
+            return
+        }
         isSyncing = true
         defer { isSyncing = false }
 
@@ -215,9 +259,19 @@ final class SearchModel {
 
     /// Puts every document recorded as having no text back in the queue, then refetches.
     func refetchMissingText() async {
-        guard let index = AppServices.shared.index else { return }
+        guard let index = AppServices.shared.index else {
+            errorMessage = AppServices.shared.startupError
+                ?? "The local cache could not be opened."
+            return
+        }
         let requeued = (try? index.retryDocumentsWithoutText()) ?? 0
-        guard requeued > 0 || (try? index.countMissingExcerpt()) ?? 0 > 0 else { return }
+        let outstanding = (try? index.countMissingExcerpt()) ?? 0
+        guard requeued > 0 || outstanding > 0 else {
+            // Saying so beats a button that appears to do nothing, which is indistinguishable
+            // from one that is broken.
+            errorMessage = "Every cached document already has its text; there is nothing to refetch."
+            return
+        }
         await fullCheck()
     }
 

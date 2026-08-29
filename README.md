@@ -129,10 +129,43 @@ Details worth knowing if you touch this code:
   Unix timestamp while `/search`'s query-string form wants `YYYY-MM-DD` (the JSON `query` object
   takes a timestamp).
 
+## The query language, and where the offline copy differs
+
+Online, the query goes to the server untouched, so the whole of Hister's language works. Offline,
+`FTSQueryTranslator` maps it onto FTS5, and the rule it follows is that a difference is *reported*
+rather than quietly applied — a narrower result set presented as the whole answer is worse than no
+answer.
+
+- **Quoted means the whole thing.** `"privacy policy"` matches only where those words are adjacent
+  and in that order; `privacy policy` matches documents holding both, anywhere, in any order, and
+  is an AND rather than an OR. That holds inside a field too — `label:"read later"` is one phrase,
+  which is the form `Labels.searchQuery(for:)` produces. `LocalIndexTests` pins all of this against
+  a corpus where the two readings give different answers.
+- **Honoured offline:** bare terms, quoted phrases, `-negation` (bare, field-scoped, and inside a
+  field as `title:-tutorial`), alternation `(a|b)` including `domain:(a|b)`, trailing `*` prefixes,
+  and the fields `title:`, `text:`, `url:`, `domain:`, `label:`, `language:`.
+- **Reported, not applied:** `sort:`, `url_re:`, `type:`, `visits:`, `added:`, `updated:`,
+  `user_id:`, `metadata.*`, and wildcards FTS5 cannot express (`*privacy*`, `f*o` — it has prefix
+  queries and nothing else). The results list says which parts were dropped.
+- **An unknown field is a search term**, because that is what the server does with it:
+  `fieldFilterValue` finds no match and the token falls through to an ordinary term query. `site:`
+  used to be treated as a filter here and as text there, so the same query meant two things.
+- Ranking still differs slightly: for a multi-word query the server adds a phrase disjunct that
+  boosts exact matches, which bm25 does not replicate. The matches are the same; the order can
+  differ.
+
 ## Around the app
 
 Command-F puts the cursor in the search field, on macOS and on iPadOS with a hardware keyboard.
-Command-R syncs.
+Command-R syncs. **Shift-Command-F** opens find-in-page over the document being read, with
+Command-G and Shift-Command-G stepping through matches and Escape closing the bar; there is a
+button in the document's action row too, since iOS has no menu to discover a shortcut from.
+
+Find-in-page is `TextFinder`, and it is deliberately *not* the query language: it matches
+characters, case- and diacritic-insensitively, in the one document on screen. Applying stemming or
+field filters to a find bar would surprise anyone who has used one anywhere else. The document body
+is rendered as one view per paragraph rather than a single `Text`, because SwiftUI cannot scroll to
+a range inside a `Text` and stepping through matches has to move the page.
 
 The detail pane, when nothing is selected, carries a link to
 [Hister's donation page](https://hister.org/support) and a short reference for the query language —

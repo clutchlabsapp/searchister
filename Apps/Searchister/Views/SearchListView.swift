@@ -32,6 +32,16 @@ struct SearchListView: View {
                 } else if model.query.isEmpty {
                     Text("Recently indexed")
                 }
+            } footer: {
+                // Only when something was actually dropped. Results that silently answer a
+                // narrower question than the one asked are worse than no results.
+                if !model.droppedDirectives.isEmpty {
+                    Text("Answered from the offline cache, which cannot apply "
+                         + model.droppedDirectives.joined(separator: ", ")
+                         + ". Connect to your server for the full query language.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .listStyle(.inset)
