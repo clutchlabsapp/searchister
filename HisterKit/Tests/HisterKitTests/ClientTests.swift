@@ -336,7 +336,7 @@ struct ClientTests {
         arguments: [
             (403, HisterError.unauthorized(detail: "")),
             (406, HisterError.skippedByServerRules(url: "https://example.com/x")),
-            (413, HisterError.payloadTooLarge),
+            (413, HisterError.payloadTooLarge(detail: "")),
             (422, HisterError.sensitiveContentRejected(url: "https://example.com/x")),
         ]
     )
@@ -359,7 +359,7 @@ struct ClientTests {
         // Retrying a document the server's rules skip, or judged sensitive, will never succeed.
         #expect(!HisterError.skippedByServerRules(url: "x").isRetryable)
         #expect(!HisterError.sensitiveContentRejected(url: "x").isRetryable)
-        #expect(!HisterError.payloadTooLarge.isRetryable)
+        #expect(!HisterError.payloadTooLarge(detail: "").isRetryable)
     }
 
     @Test(

@@ -55,6 +55,13 @@ public final class AppServices {
         return _ingest
     }
 
+    /// Re-reads one document from its source. Built per call rather than cached: it holds no
+    /// state, and a stale client here would keep talking to a server the user has since changed.
+    public func refresher() -> DocumentRefresher? {
+        guard let index else { return nil }
+        return DocumentRefresher(index: index, store: credentials)
+    }
+
     public var spotlight: SpotlightIndexer? {
         guard let index else { return nil }
         if let _spotlight { return _spotlight }

@@ -83,8 +83,17 @@ public struct IngestService: Sendable {
     @discardableResult
     public func accept(url: URL, title: String? = nil) async throws -> IngestOutcome {
         var item = extractor.webItem(url: url, title: title)
-        // Same reason as the share sheet: a URL on its own gives Hister nothing to extract.
-        item.document.html = await PageFetcher.html(for: url)
+        // Same reason as the share sheet: a URL on its own gives Hister nothing to extract. And
+        // the same size problem — a fetched page can be mostly script too — so it is reduced
+        // before it is queued, falling back to the page's text when the markup will not fit.
+        if let fetched = await PageFetcher.html(for: url) {
+            switch HTMLReducer.reduce(fetched) {
+            case .html(let reduced):
+                item.document.html = reduced
+            case .text(let extracted):
+                item.document.text = extracted
+            }
+        }
         try outbox.enqueue(item)
         optimisticallyCache(item)
         await uploader.flush()

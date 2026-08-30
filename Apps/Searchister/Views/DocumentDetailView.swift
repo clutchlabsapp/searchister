@@ -11,6 +11,8 @@ struct DocumentDetailView: View {
     @State private var isShowingExcerpt = false
     @State private var isConfirmingDelete = false
     @State private var isDeleting = false
+    @State private var isRereading = false
+    @State private var refreshNote: String?
     @State private var isFinding = false
     @State private var findNeedle = ""
     @State private var findCurrent = 0
@@ -100,20 +102,27 @@ struct DocumentDetailView: View {
                 HStack(spacing: 12) {
                     if let link = URL(string: document.url), link.scheme != "remote-file" {
                         Link(destination: link) {
-                            Label("Open original", systemImage: "arrow.up.right.square")
+                            Label("Open", systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.bordered)
                     }
 
                     if bodyText?.isEmpty == false {
                         Button { isFinding = true } label: {
-                            Label("Find in page", systemImage: "text.magnifyingglass")
+                            Label("Find", systemImage: "text.magnifyingglass")
                         }
                         .buttonStyle(.bordered)
                         .help("Find in page (⇧⌘F)")
                     }
 
                     Spacer()
+
+                    Button { Task { await reread() } } label: {
+                        Label("Reindex", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isRereading)
+                    .help("Fetch the page again and have Hister re-index it")
 
                     Button(role: .destructive) {
                         isConfirmingDelete = true
@@ -154,6 +163,22 @@ struct DocumentDetailView: View {
                         .buttonStyle(.bordered)
                         .disabled(!hasUnsavedLabels)
                     }
+                }
+
+                if isRereading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Fetching the page and re-indexing it…")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else if let refreshNote {
+                    // Says which of the two things happened. A refresh that could not re-read the
+                    // page still updates from the server, and claiming otherwise would be a lie
+                    // about how fresh what is on screen actually is.
+                    Label(refreshNote, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if let error {
@@ -205,6 +230,9 @@ struct DocumentDetailView: View {
             .frame(maxWidth: 720, alignment: .leading)
             .padding(20)
             }
+            // Pull to refresh, on the platform that has the gesture. macOS gets the button in
+            // the action row instead — a ScrollView there has nothing to pull.
+            .refreshable { await reread() }
         }
         // Bringing the paragraph into view is the whole reason the body is rendered as
         // paragraphs rather than one Text: SwiftUI cannot scroll to a range inside a Text.
@@ -222,6 +250,37 @@ struct DocumentDetailView: View {
         withAnimation { scroll.scrollTo(Self.paragraphID(match.paragraph), anchor: .center) }
     }
 
+    /// Fetches the live page, has the server re-index it, and shows what came back.
+    private func reread() async {
+        guard let url, !isRereading else { return }
+        guard let refresher = AppServices.shared.refresher() else {
+            error = AppServices.shared.startupError ?? "The local cache could not be opened."
+            return
+        }
+
+        isRereading = true
+        defer { isRereading = false }
+        error = nil
+
+        do {
+            let outcome = try await refresher.refresh(url: url)
+            document = outcome.document
+            labels = Labels.parse(outcome.document.label)
+            bodyText = outcome.document.fullText ?? outcome.document.excerpt
+            isShowingExcerpt = outcome.document.fullText == nil
+            switch outcome.source {
+            case .rereadFromWeb:
+                refreshNote = "Re-read from the page and re-indexed."
+            case .serverOnly(let reason):
+                refreshNote = reason + " Refreshed from the server's copy."
+            }
+            // The document on screen is the one the list is showing, so keep them in step.
+            model.documentWasRefreshed(url: url)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
     private func load() async {
         guard let url, let index = AppServices.shared.index else {
             document = nil
@@ -231,6 +290,7 @@ struct DocumentDetailView: View {
         labels = Labels.parse(document?.label)
         labelDraft = ""
         error = nil
+        refreshNote = nil
 
         // Show the cached copy straight away. The full text is a round trip to the server, and
         // waiting on it behind a spinner made opening a result feel like loading a web page even

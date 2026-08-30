@@ -41,6 +41,7 @@ rm -f "$WORK/Sources/HisterKit/Client/KeychainStore.swift" \
       "$WORK/Sources/HisterKit/Ingest/DocumentExtractor.swift" \
       "$WORK/Sources/HisterKit/Ingest/IngestService.swift" \
       "$WORK/Sources/HisterKit/Ingest/PageFetcher.swift" \
+      "$WORK/Sources/HisterKit/Search/DocumentRefresher+Web.swift" \
       "$WORK/Sources/HisterKit/Sync/OutboxUploader.swift" \
       "$WORK/Sources/HisterKit/Support/AppGroup.swift"
 rm -f "$WORK/Tests/HisterKitTests/SpotlightIndexerTests.swift" \

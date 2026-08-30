@@ -138,6 +138,18 @@ final class SearchModel {
         refreshCounts()
     }
 
+    /// Replaces a re-read document in the on-screen list, so the row's title and snippet match
+    /// what the detail pane is now showing rather than the copy the search returned.
+    func documentWasRefreshed(url: String) {
+        guard let index = AppServices.shared.index,
+              let fresh = try? index.document(url: url),
+              let position = hits.firstIndex(where: { $0.id == url })
+        else {
+            return
+        }
+        hits[position] = CachedSearchHit(document: fresh, snippet: hits[position].snippet)
+    }
+
     /// Runs the query that finds everything carrying this label.
     func search(forLabel label: String) {
         query = Labels.searchQuery(for: label)
