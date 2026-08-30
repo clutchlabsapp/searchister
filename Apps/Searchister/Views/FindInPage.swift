@@ -14,14 +14,22 @@ extension TextFinder {
         for (position, range) in matches(inParagraph: index) {
             guard let attributedRange = Range(range, in: result) else { continue }
             let isCurrent = position == current
-            result[attributedRange].backgroundColor = isCurrent ? .orange : .yellow
-            result[attributedRange].foregroundColor = .black
+            // Attributes are set by key type rather than through the `.backgroundColor` dynamic
+            // member. That spelling forms a KeyPath into AttributeScopes.SwiftUIAttributes, which
+            // is not Sendable — a warning today and an error in the Swift 6 language mode. Naming
+            // the key directly forms no key path at all.
+            result[attributedRange][BackgroundColor.self] = isCurrent ? .orange : .yellow
+            result[attributedRange][ForegroundColor.self] = .black
             if isCurrent {
-                result[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+                result[attributedRange][Emphasis.self] = .stronglyEmphasized
             }
         }
         return result
     }
+
+    private typealias BackgroundColor = AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute
+    private typealias ForegroundColor = AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute
+    private typealias Emphasis = AttributeScopes.FoundationAttributes.InlinePresentationIntentAttribute
 }
 
 /// The find bar: a field, a count, and the two buttons that move through the matches.
