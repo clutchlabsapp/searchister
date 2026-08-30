@@ -282,7 +282,14 @@ final class FakeHisterAPI: HisterAPI, @unchecked Sendable {
 
     func stats() async throws -> HisterStats { HisterStats(documentCount: statsCount) }
 
-    func add(_ document: HisterDocument) async throws { addedDocuments.append(document) }
+    /// Makes every write answer 401, which is what a read-only configuration does — the built-in
+    /// demo server above all, since Hister exempts only its Public endpoints and no write is one.
+    var rejectsWrites = false
+
+    func add(_ document: HisterDocument) async throws {
+        if rejectsWrites { throw HisterError.unauthorized(detail: "read-only") }
+        addedDocuments.append(document)
+    }
 
     func addPDF(_ document: HisterDocument, pdfData: Data) async throws {
         addedDocuments.append(document)
