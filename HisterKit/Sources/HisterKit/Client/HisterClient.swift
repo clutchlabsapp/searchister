@@ -339,7 +339,7 @@ public struct HisterClient: HisterAPI {
         case 406:
             throw HisterError.skippedByServerRules(url: context)
         case 413:
-            throw HisterError.payloadTooLarge
+            throw HisterError.payloadTooLarge(detail: body)
         case 422:
             throw HisterError.sensitiveContentRejected(url: context)
         default:

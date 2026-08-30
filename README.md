@@ -129,6 +129,30 @@ Details worth knowing if you touch this code:
   Unix timestamp while `/search`'s query-string form wants `YYYY-MM-DD` (the JSON `query` object
   takes a timestamp).
 
+## How much of a page gets sent
+
+Hister only extracts a title and body text when it is handed HTML — `Process` gates extraction on
+`d.HTML != ""` and the server never fetches a URL itself — so the app sends markup. It does not
+send all of it.
+
+A hydrated single-page app keeps a second copy of its whole content as JSON inside `<script>`
+tags, so `documentElement.outerHTML` for a busy Reddit thread runs to tens of megabytes for an
+article of a few thousand words. `HTMLReducer` drops the elements Hister has no use for — script,
+style, noscript, svg, template, iframe, canvas, map, picture — along with comments and inline
+`data:` URIs, and caps the result at 600 KB. The share extension does the same reduction *in the
+page*, before the string crosses the extension boundary, which is where it is cheapest.
+
+If the markup is still too large after that, the page is sent as text instead: a web document
+submitted with `text` and no `html` is accepted and indexed with that text, because `Process`
+runs `finalizeDocument` either way and only skips the extraction step.
+
+The 600 KB ceiling is well under Hister's own default of 40 MiB, for two reasons the app cannot
+see from where it stands. The body is JSON, so every `"` and `\` in the markup costs two bytes.
+And a reverse proxy in front of Hister enforces a limit of its own — nginx's
+`client_max_body_size` defaults to 1 MiB — so a page Hister would accept can be refused before it
+arrives. That is also why a 413 now reports whatever the responder said rather than naming
+Hister's limit: the app does not know which of them answered.
+
 ## Re-reading one document
 
 Pull down on a document (or press **Re-read**) and the app fetches the live page, hands the markup

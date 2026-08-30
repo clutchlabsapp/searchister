@@ -20,8 +20,14 @@ public enum HisterError: Error, Equatable, Sendable {
     /// 422 — Hister classified the content as sensitive and refused to index it.
     case sensitiveContentRejected(url: String)
 
-    /// 413 — body exceeded `server.max_batch_body_size` (40 MiB by default).
-    case payloadTooLarge
+    /// 413 — the body was refused as too large, carrying whatever the responder said.
+    ///
+    /// The detail matters because the responder is not necessarily Hister. `/api/add` answers
+    /// with its own configured limit ("request body exceeds the N MiB limit"), but a reverse
+    /// proxy in front of it refuses first and says something else entirely — nginx's
+    /// `client_max_body_size` defaults to 1 MiB. Naming Hister's default here stated a cause the
+    /// app cannot know.
+    case payloadTooLarge(detail: String)
 
     /// Any other non-2xx response.
     case httpError(status: Int, body: String)
@@ -62,8 +68,10 @@ extension HisterError: LocalizedError {
             return "The server's rules skip this URL, so it was not indexed: \(url)"
         case .sensitiveContentRejected(let url):
             return "Hister classified this document as sensitive and did not index it: \(url)"
-        case .payloadTooLarge:
-            return "The document is larger than the server's upload limit (server.max_batch_body_size, 40 MiB by default)."
+        case .payloadTooLarge(let detail):
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            let limit = trimmed.isEmpty ? "" : " The server said: \(trimmed)"
+            return "This page was too large for the server to accept.\(limit)"
         case .httpError(let status, let body):
             let detail = body.trimmingCharacters(in: .whitespacesAndNewlines)
             return detail.isEmpty ? "The server returned HTTP \(status)." : "The server returned HTTP \(status): \(detail)"

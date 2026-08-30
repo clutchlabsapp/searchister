@@ -144,15 +144,27 @@ public struct DocumentExtractor: Sendable {
 
         guard let url = URL(string: payload.urlString) else { return nil }
 
+        // The preprocessor already reduces the markup in the page, which is where it is cheapest
+        // to do. This is the backstop for a page it could not clone, and for a build running an
+        // older copy of the script.
+        var html: String?
+        var text = payload.text
+        if let raw = payload.html, case .html(let reduced) = HTMLReducer.reduce(raw) {
+            html = reduced
+        } else if let raw = payload.html, text == nil {
+            text = HTMLReducer.text(from: raw)
+        }
+
         return IngestItem(
             kind: .add,
             document: HisterDocument(
                 url: url.absoluteString,
-                html: payload.html,
+                html: html,
                 title: payload.title,
-                // The server extracts title and text from `html`; `text` is only a fallback for
-                // pages whose markup defeats that extractor.
-                text: payload.html == nil ? payload.text : nil,
+                // The server extracts title and text from `html`; `text` carries the page when
+                // the markup was too large to send, and is a fallback for pages whose markup
+                // defeats that extractor.
+                text: html == nil ? text : nil,
                 type: .webPage
             )
         )
