@@ -113,18 +113,18 @@ enum HighlightFormatter {
     static func attributed(_ snippet: String) -> AttributedString {
         var result = AttributedString()
         var isHighlighted = false
+        var emphasisAttributes = AttributeContainer()
+        emphasisAttributes[AttributeScopes.FoundationAttributes.InlinePresentationIntentAttribute.self] = .stronglyEmphasized
 
         for piece in snippet.components(separatedBy: LocalIndex.highlightStart) {
             let parts = piece.components(separatedBy: LocalIndex.highlightEnd)
             if parts.count == 1 {
                 var run = AttributedString(parts[0])
-                if isHighlighted { run.inlinePresentationIntent = .stronglyEmphasized }
+                if isHighlighted { run.mergeAttributes(emphasisAttributes) }
                 result += run
                 isHighlighted = false
             } else {
-                var highlighted = AttributedString(parts[0])
-                highlighted.inlinePresentationIntent = .stronglyEmphasized
-                result += highlighted
+                result += AttributedString(parts[0], attributes: emphasisAttributes)
                 result += AttributedString(parts.dropFirst().joined(separator: LocalIndex.highlightEnd))
             }
         }
