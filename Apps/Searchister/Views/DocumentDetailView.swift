@@ -102,27 +102,27 @@ struct DocumentDetailView: View {
                 HStack(spacing: 12) {
                     if let link = URL(string: document.url), link.scheme != "remote-file" {
                         Link(destination: link) {
-                            Label("Open original", systemImage: "arrow.up.right.square")
+                            Label("Open", systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.bordered)
                     }
 
                     if bodyText?.isEmpty == false {
                         Button { isFinding = true } label: {
-                            Label("Find in page", systemImage: "text.magnifyingglass")
+                            Label("Find", systemImage: "text.magnifyingglass")
                         }
                         .buttonStyle(.bordered)
                         .help("Find in page (⇧⌘F)")
                     }
 
+                    Spacer()
+
                     Button { Task { await reread() } } label: {
-                        Label("Re-read", systemImage: "arrow.clockwise")
+                        Label("Reindex", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .disabled(isRereading)
                     .help("Fetch the page again and have Hister re-index it")
-
-                    Spacer()
 
                     Button(role: .destructive) {
                         isConfirmingDelete = true
