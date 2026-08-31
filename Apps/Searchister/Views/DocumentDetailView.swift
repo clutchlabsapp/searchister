@@ -18,6 +18,7 @@ struct DocumentDetailView: View {
     @State private var findCurrent = 0
     @State private var labelDraft = ""
     @State private var labels: [String] = []
+    @State private var draftLabels: [String] = []
     @State private var error: String?
 
     var body: some View {
@@ -100,6 +101,8 @@ struct DocumentDetailView: View {
                 }
 
                 HStack(spacing: 12) {
+                    Spacer()
+
                     if let link = URL(string: document.url), link.scheme != "remote-file" {
                         Link(destination: link) {
                             Label("Open", systemImage: "arrow.up.right.square")
@@ -122,14 +125,15 @@ struct DocumentDetailView: View {
 
                     }
 
-                    Spacer()
-
                     Button { Task { await reread() } } label: {
                         Label("Reindex", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.bordered)
                     .disabled(isRereading)
                     .help("Fetch the page again and have Hister re-index it")
+                    #if os(iOS)
+                    .labelStyle(.iconOnly)
+                    #endif
 
                     Button(role: .destructive) {
                         isConfirmingDelete = true
@@ -138,6 +142,10 @@ struct DocumentDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(isDeleting)
+                    #if os(iOS)
+                    .labelStyle(.iconOnly)
+                    #endif
+
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -146,6 +154,19 @@ struct DocumentDetailView: View {
                             ForEach(labels, id: \.self) { label in
                                 LabelChip(
                                     label: label,
+                                    color: nil,
+                                    onSearch: { model.search(forLabel: label) },
+                                    onRemove: { labels = Labels.removing(label, from: labels) }
+                                )
+                            }
+                        }
+                    }
+                    if !draftLabels.isEmpty {
+                        FlowLayout {
+                            ForEach(draftLabels, id: \.self) { label in
+                                LabelChip(
+                                    label: label,
+                                    color: Color.gray,
                                     onSearch: { model.search(forLabel: label) },
                                     onRemove: { labels = Labels.removing(label, from: labels) }
                                 )
@@ -321,12 +342,12 @@ struct DocumentDetailView: View {
 
     /// Labels the user has staged but not saved yet.
     private var hasUnsavedLabels: Bool {
-        Labels.format(labels) != Labels.format(Labels.parse(document?.label))
+        Labels.format(draftLabels) != Labels.format(Labels.parse(document?.label))
     }
 
     private func commitDraftLabel() {
         let candidate = labelDraft.trimmingCharacters(in: CharacterSet(charactersIn: ", \n"))
-        labels = Labels.adding(candidate, to: labels)
+        draftLabels = Labels.adding(candidate, to: draftLabels)
         labelDraft = ""
     }
 
@@ -356,7 +377,7 @@ struct DocumentDetailView: View {
         // quietly discard what the user typed.
         commitDraftLabel()
 
-        let joined = Labels.format(labels)
+        let joined = Labels.format(draftLabels)
         do {
             let client = HisterClient(store: AppServices.shared.credentials)
             // An empty string is how the server is told to clear the label.
@@ -366,6 +387,8 @@ struct DocumentDetailView: View {
                 try? AppServices.shared.index?.upsert([updated])
                 document = updated
             }
+            labels += draftLabels
+            draftLabels = []
             error = nil
         } catch {
             self.error = error.localizedDescription
@@ -376,6 +399,7 @@ struct DocumentDetailView: View {
 /// One label, with a control to remove it. Tapping the label itself searches for it.
 private struct LabelChip: View {
     let label: String
+    let color: Color?
     let onSearch: () -> Void
     let onRemove: () -> Void
 
@@ -398,6 +422,6 @@ private struct LabelChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(.tint.opacity(0.15), in: Capsule())
+        .background(color ?? Color.accentColor)
     }
 }
