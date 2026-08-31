@@ -45,8 +45,23 @@
 	<true/>
 
 	<!-- iOS-only keys; ignored on macOS. -->
+
+	<!-- The launch screen is declared here rather than as a LaunchScreen.storyboard, because
+	     Searchister is one target that builds for both iOS and macOS: a storyboard added to it
+	     gets compiled for the Mac destination too, which fails with "iOS storyboards do not
+	     support target device type Mac". A dictionary has no such problem — macOS ignores the
+	     whole key. UIImageName names an image set in Apps/Searchister/Assets.xcassets, which is
+	     centred over UIColorName; per-resolution launch *images* have not been supported since
+	     iOS 13. -->
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIImageName</key>
+		<string>LaunchImage</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<true/>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UISupportedInterfaceOrientations</key>
