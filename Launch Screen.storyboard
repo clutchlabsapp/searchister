@@ -22,7 +22,7 @@
                                 <color key="textColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                 <nil key="highlightedColor"/>
                             </label>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" fixedFrame="YES" image="logo 2.png" translatesAutoresizingMaskIntoConstraints="NO" id="cYq-Lm-G0a">
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" fixedFrame="YES" image="logo.png" translatesAutoresizingMaskIntoConstraints="NO" id="cYq-Lm-G0a">
                                 <rect key="frame" x="-82" y="412" width="739" height="819"/>
                                 <autoresizingMask key="autoresizingMask" flexibleMinX="YES" flexibleMinY="YES"/>
                             </imageView>
@@ -43,7 +43,7 @@
         </scene>
     </scenes>
     <resources>
-        <image name="logo 2.png" width="738.75" height="818.25"/>
+        <image name="logo.png" width="738.75" height="818.25"/>
         <namedColor name="AccentColor">
             <color red="0.5727539062" green="0.36083987360000003" blue="0.6943359375" alpha="1" colorSpace="custom" customColorSpace="displayP3"/>
         </namedColor>
