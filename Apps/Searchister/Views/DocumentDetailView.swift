@@ -102,13 +102,13 @@ struct DocumentDetailView: View {
                 HStack(spacing: 12) {
                     if let link = URL(string: document.url), link.scheme != "remote-file" {
                         Link(destination: link) {
-                            #if os(macOS)
                             Label("Open", systemImage: "arrow.up.right.square")
-                            #else
-                            Label("", systemImage: "arrow.up.right.square")
-                            #endif
+                        
                         }
                         .buttonStyle(.bordered)
+                        #if os(iOS)
+                        .labelStyle(.iconOnly)
+                        #endif
                     }
 
                     if bodyText?.isEmpty == false {
