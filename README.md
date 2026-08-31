@@ -358,7 +358,16 @@ at the `LaunchImage` image set and `LaunchBackground` colour in `Apps/Searchiste
 is compiled for the Mac destination too and fails with *iOS storyboards do not support target
 device type "Mac"*. The dictionary form is ignored on macOS instead.
 
-The image set ships empty — drop `LaunchImage.png`, `LaunchImage@2x.png` and `LaunchImage@3x.png`
-into it (or drag your files onto the set in Xcode) at 1x/2x/3x of whatever point size you want
-the mark drawn at. iOS caches the launch screen aggressively; delete the app from the device or
-simulator to see a change.
+The image set is single-scale: one 985 x 1091 `LaunchImage.png`, which iOS scales down to fit the
+safe area, so there are no `@2x`/`@3x` variants to keep in step. Per-resolution launch *images*
+have not been supported since iOS 13 — the dictionary takes one asset and lays it out.
+
+If you ever do want a layout the dictionary cannot express (an off-centre mark, several elements),
+a storyboard can be brought back, but it then has to be kept away from the Mac destination:
+
+```
+EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*] = LaunchScreen.storyboard
+```
+
+iOS caches the launch screen aggressively; delete the app from the device or simulator to see a
+change.

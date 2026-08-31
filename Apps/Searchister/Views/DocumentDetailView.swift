@@ -103,13 +103,21 @@ struct DocumentDetailView: View {
                     if let link = URL(string: document.url), link.scheme != "remote-file" {
                         Link(destination: link) {
                             Label("Open", systemImage: "arrow.up.right.square")
+                        
                         }
                         .buttonStyle(.bordered)
+                        #if os(iOS)
+                        .labelStyle(.iconOnly)
+                        #endif
                     }
 
                     if bodyText?.isEmpty == false {
                         Button { isFinding = true } label: {
+                            #if os(macOS)
                             Label("Find", systemImage: "text.magnifyingglass")
+                            #else
+                            Label("", systemImage: "text.magnifyingglass")
+                            #endif
                         }
                         .buttonStyle(.bordered)
                         .help("Find in page (⇧⌘F)")
