@@ -7,9 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		6A9D38233045868900C63652 /* Launch Screen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 6A9D38223045868900C63652 /* Launch Screen.storyboard */; };
+		6A9D38253045869600C63652 /* logo.png in Resources */ = {isa = PBXBuildFile; fileRef = 6A9D38243045869600C63652 /* logo.png */; };
 		A10000000000000000000041 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A10000000000000000000061 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000301 /* HisterKit */; };
 		A10000000000000000000042 /* SpotlightIndexExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* SpotlightIndexExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10000000000000000000061 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000301 /* HisterKit */; };
 		A10000000000000000000062 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000302 /* HisterKit */; };
 		A10000000000000000000063 /* HisterKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000303 /* HisterKit */; };
 /* End PBXBuildFile section */
@@ -47,6 +49,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		6A9D38223045868900C63652 /* Launch Screen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = "Launch Screen.storyboard"; sourceTree = "<group>"; };
+		6A9D38243045869600C63652 /* logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = logo.png; sourceTree = "<group>"; };
 		A10000000000000000000011 /* Searchister.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Searchister.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000012 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000013 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
@@ -125,10 +129,12 @@
 		A10000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				6A9D38223045868900C63652 /* Launch Screen.storyboard */,
 				A10000000000000000000002 /* Apps */,
 				A10000000000000000000003 /* Config */,
 				A1000000000000000000001A /* README.md */,
 				A10000000000000000000004 /* Products */,
+				6A9D38243045869600C63652 /* logo.png */,
 			);
 			sourceTree = "<group>";
 		};
@@ -294,6 +300,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6A9D38233045868900C63652 /* Launch Screen.storyboard in Resources */,
+				6A9D38253045869600C63652 /* logo.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -425,6 +433,7 @@
 				DEVELOPMENT_TEAM = U3286CH8VT;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "\"Launch Screen.storyboard\"";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/Searchister-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Searchister;
@@ -459,6 +468,7 @@
 				DEVELOPMENT_TEAM = U3286CH8VT;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]" = "\"Launch Screen.storyboard\"";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/Searchister-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Searchister;

@@ -105,6 +105,9 @@ struct DocumentDetailView: View {
                             Label("Open", systemImage: "arrow.up.right.square")
                         }
                         .buttonStyle(.bordered)
+                        #if os(iOS)
+                        .labelStyle(.iconOnly)
+                        #endif
                     }
 
                     if bodyText?.isEmpty == false {
@@ -113,6 +116,10 @@ struct DocumentDetailView: View {
                         }
                         .buttonStyle(.bordered)
                         .help("Find in page (⇧⌘F)")
+                        #if os(iOS)
+                        .labelStyle(.iconOnly)
+                        #endif
+
                     }
 
                     Spacer()
