@@ -341,24 +341,3 @@ HisterKit/Tests/               swift test --package-path HisterKit
 Apps/Searchister/              SwiftUI app and App Intents
 Apps/ShareExtension/           share sheet target
 ```
-
-`Apps/Searchister` and `Apps/ShareExtension` are file-system synchronized groups, so anything
-dropped into them joins the target with no project-file edit.
-
-### Icon and launch screen
-
-The app icon is `Apps/Searchister/Application.icon`, edited in Icon Composer rather than by hand;
-`ASSETCATALOG_COMPILER_APPICON_NAME = Application` in the app target's two configurations is what
-names it, and Xcode generates the flat pre-26 icons from the same file.
-
-The launch screen is the `UILaunchScreen` dictionary in `Config/Searchister-Info.plist`, pointing
-at the `LaunchImage` image set and `LaunchBackground` colour in `Apps/Searchister/Assets.xcassets`
-(the colour matches the icon's fill). It is deliberately **not** a `LaunchScreen.storyboard`:
-`Searchister` is a single target that builds for both iOS and macOS, so a storyboard added to it
-is compiled for the Mac destination too and fails with *iOS storyboards do not support target
-device type "Mac"*. The dictionary form is ignored on macOS instead.
-
-The image set ships empty — drop `LaunchImage.png`, `LaunchImage@2x.png` and `LaunchImage@3x.png`
-into it (or drag your files onto the set in Xcode) at 1x/2x/3x of whatever point size you want
-the mark drawn at. iOS caches the launch screen aggressively; delete the app from the device or
-simulator to see a change.
