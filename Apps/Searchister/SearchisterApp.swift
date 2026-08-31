@@ -80,7 +80,7 @@ struct SearchisterApp: App {
 /// Documents indexed from local files keep opening in the app: `remote-file://` is Hister's own
 /// scheme and the system cannot do anything with it.
 enum SpotlightOpener {
-    @MainActor static func open(_ identifier: String, fallback: (String) -> Void) {
+    static func open(_ identifier: String, fallback: (String) -> Void) {
         guard let url = URL(string: identifier), url.scheme != "remote-file" else {
             fallback(identifier)
             return

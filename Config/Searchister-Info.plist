@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>app.clutchlabs.searchister.sync</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -20,50 +24,24 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
-	<key>NSHumanReadableCopyright</key>
-	<string></string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-
-	<!-- Read by AppGroup.swift so the app and the share extension resolve the same container. -->
+	<key>CoreSpotlightContinuation</key>
+	<true/>
 	<key>HisterAppGroupIdentifier</key>
 	<string>$(HISTER_APP_GROUP)</string>
 	<key>HisterKeychainAccessGroup</key>
 	<string>$(HISTER_KEYCHAIN_GROUP)</string>
-
-	<!-- Must match AppDelegate.backgroundTaskIdentifier or BGTaskScheduler refuses to register. -->
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>app.clutchlabs.searchister.sync</string>
-	</array>
-
-	<!-- Lets a Spotlight result group offer "Search all of Hister for …", handled in
-	     SearchisterApp via CSQueryContinuationActionType. -->
-	<key>CoreSpotlightContinuation</key>
-	<true/>
-
-	<!-- iOS-only keys; ignored on macOS. -->
-
-	<!-- The launch screen is a dictionary rather than a UILaunchStoryboardName, because
-	     Searchister is a single target that builds for both iOS and macOS: a storyboard added to
-	     it is compiled for the Mac destination too, which fails with "iOS storyboards do not
-	     support target device type Mac". macOS ignores this key outright instead.
-
-	     UIImageName names the image set in Apps/Searchister/Assets.xcassets; it is scaled to fit
-	     and centred over UIColorName, which is the icon's own fill colour. -->
-	<key>UILaunchScreen</key>
-	<dict>
-		<key>UIImageName</key>
-		<string>LaunchImage</string>
-		<key>UIImageRespectsSafeAreaInsets</key>
-		<true/>
-		<key>UIColorName</key>
-		<string>LaunchBackground</string>
-	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UILaunchStoryboardName</key>
+	<string>Launch Screen.storyboard</string>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
