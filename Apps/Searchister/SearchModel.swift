@@ -52,6 +52,16 @@ final class SearchModel {
         findInPageToken += 1
     }
 
+    /// How many rows a search asks for, and how many recent documents fill an empty screen.
+    /// One number because they are the same list: a screenful, with more available by searching.
+    private static let resultLimit = 50
+
+    /// How long typing has to settle before the query goes to the server.
+    private static let searchDebounce = Duration.milliseconds(250)
+
+    /// How often the engine's phase is read while a sync runs.
+    private static let phasePollInterval = Duration.milliseconds(400)
+
     private var searchTask: Task<Void, Never>?
     /// Whether a sync is in flight. Observable, and the reason is visibility: this used to be a
     /// private flag that every sync control silently returned on, so a sync that never finished
@@ -83,7 +93,7 @@ final class SearchModel {
     /// opens on a blank screen.
     func showRecent() {
         guard let index = AppServices.shared.index else { return }
-        let recent = (try? index.recent(limit: 50)) ?? []
+        let recent = (try? index.recent(limit: Self.resultLimit)) ?? []
         hits = recent.map { CachedSearchHit(document: $0, snippet: nil) }
         total = nil
         suggestion = nil
@@ -101,12 +111,12 @@ final class SearchModel {
         searchTask = Task {
             // Show cache results immediately, then let the server's answer replace them. This is
             // what makes typing feel instant on a self-hosted server over the open internet.
-            if let cached = try? AppServices.shared.search?.searchCache(text, limit: 50) {
+            if let cached = try? AppServices.shared.search?.searchCache(text, limit: Self.resultLimit) {
                 guard !Task.isCancelled else { return }
                 hits = cached.hits
             }
 
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: Self.searchDebounce)
             guard !Task.isCancelled else { return }
             await runSearch()
         }
@@ -118,7 +128,7 @@ final class SearchModel {
         isSearching = true
         defer { isSearching = false }
 
-        let outcome = await search.search(text, limit: 50)
+        let outcome = await search.search(text, limit: Self.resultLimit)
         guard !Task.isCancelled, text == query else { return }
         hits = outcome.hits
         total = outcome.total
@@ -178,63 +188,58 @@ final class SearchModel {
     }
 
     func sync(scope: SyncEngine.SyncScope = .fullCheck) async {
-        guard let engine = AppServices.shared.syncEngine() else {
-            // The only way this fails now that credentials fall back to the demo is the cache
-            // itself failing to open, so say that rather than asking for a server they may
-            // already have set.
-            errorMessage = AppServices.shared.startupError
-                ?? "The local cache could not be opened, so there is nothing to sync into."
-            return
+        let didRun = await runSyncJob { _ in
+            try await AppServices.shared.refresh(scope: scope)
         }
-        // A window per screen on macOS, plus pull-to-refresh, plus the post-save trigger: all of
-        // them can land at once, and two concurrent seeds would fight over the same cursor.
-        guard !isSyncing else {
-            errorMessage = "A sync is already running. Wait for it to finish, or quit and reopen "
-                + "the app if it looks stuck."
-            return
-        }
-        isSyncing = true
-        defer { isSyncing = false }
-
-        await withPhaseUpdates(from: engine) {
-            do {
-                try await AppServices.shared.refresh(scope: scope)
-                self.errorMessage = nil
-            } catch {
-                self.errorMessage = error.localizedDescription
-            }
-        }
+        guard didRun else { return }
 
         refreshCounts()
         if query.isEmpty { showRecent() }
     }
 
     func resync() async {
+        let didRun = await runSyncJob { engine in
+            _ = try await engine.resetAndReseed()
+            try? await AppServices.shared.spotlight?.reindexAll()
+        }
+        guard didRun else { return }
+
+        refreshCounts()
+        showRecent()
+    }
+
+    /// Runs one job against the sync engine, with the guards and reporting every such job needs.
+    ///
+    /// - Returns: whether the job actually ran. A caller that refreshes counts afterwards should
+    ///   not bother when it did not — nothing changed.
+    private func runSyncJob(_ job: (SyncEngine) async throws -> Void) async -> Bool {
         guard let engine = AppServices.shared.syncEngine() else {
+            // The only way this fails now that credentials fall back to the demo is the cache
+            // itself failing to open, so say that rather than asking for a server they may
+            // already have set.
             errorMessage = AppServices.shared.startupError
                 ?? "The local cache could not be opened, so there is nothing to sync into."
-            return
+            return false
         }
+        // A window per screen on macOS, plus pull-to-refresh, plus the post-save trigger: all of
+        // them can land at once, and two concurrent seeds would fight over the same cursor.
         guard !isSyncing else {
             errorMessage = "A sync is already running. Wait for it to finish, or quit and reopen "
                 + "the app if it looks stuck."
-            return
+            return false
         }
         isSyncing = true
         defer { isSyncing = false }
 
         await withPhaseUpdates(from: engine) {
             do {
-                _ = try await engine.resetAndReseed()
-                try? await AppServices.shared.spotlight?.reindexAll()
+                try await job(engine)
                 self.errorMessage = nil
             } catch {
                 self.errorMessage = error.localizedDescription
             }
         }
-
-        refreshCounts()
-        showRecent()
+        return true
     }
 
     /// Runs `work` while mirroring the engine's phase into `syncPhase`.
@@ -248,7 +253,7 @@ final class SearchModel {
         let poller = Task { [weak self] in
             while !Task.isCancelled {
                 self?.syncPhase = await engine.phase
-                try? await Task.sleep(for: .milliseconds(400))
+                try? await Task.sleep(for: Self.phasePollInterval)
             }
         }
         await work()
@@ -292,13 +297,23 @@ final class SearchModel {
         refreshCounts()
     }
 
+    /// Both of these act on a row the user is looking at, so a failure has to reach them — a
+    /// retry that silently does nothing is indistinguishable from a broken button.
     func retryUpload(_ item: OutboxItem) async {
-        try? await AppServices.shared.ingest?.retry(id: item.id)
+        do {
+            try await AppServices.shared.ingest?.retry(id: item.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         refreshCounts()
     }
 
     func discardUpload(_ item: OutboxItem) {
-        try? AppServices.shared.ingest?.discard(id: item.id)
+        do {
+            try AppServices.shared.ingest?.discard(id: item.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         refreshCounts()
     }
 
