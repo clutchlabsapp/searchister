@@ -317,16 +317,24 @@ final class SearchModel {
         refreshCounts()
     }
 
-    func addURL(_ raw: String) async {
+    /// Fetches a link and queues it for the server.
+    ///
+    /// - Returns: whether it was accepted. A caller presenting a dialog stays open when it was
+    ///   not, so the reason is still on screen next to the address that caused it.
+    @discardableResult
+    func addURL(_ raw: String) async -> Bool {
         guard let url = URL(string: raw.trimmingCharacters(in: .whitespaces)), url.scheme != nil else {
             errorMessage = "That does not look like a URL."
-            return
+            return false
         }
         do {
             _ = try await AppServices.shared.ingest?.accept(url: url)
             refreshCounts()
+            errorMessage = nil
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
