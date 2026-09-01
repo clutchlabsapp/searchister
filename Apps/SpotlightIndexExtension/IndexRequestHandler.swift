@@ -56,8 +56,9 @@ final class IndexRequestHandler: CSIndexExtensionRequestHandler {
         _ acknowledge: @escaping () -> Void,
         job: @escaping @Sendable (SpotlightIndexer) async throws -> Void
     ) {
+        nonisolated(unsafe) let ack = acknowledge
         Task {
-            defer { acknowledge() }
+            defer { ack() }
             do {
                 // Deliberately not the index the system handed us. `SpotlightIndexer` publishes
                 // into `CSSearchableIndex.default()`, which is where the app publishes too, and
