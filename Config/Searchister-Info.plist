@@ -30,6 +30,8 @@
 	<string>$(HISTER_APP_GROUP)</string>
 	<key>HisterKeychainAccessGroup</key>
 	<string>$(HISTER_KEYCHAIN_GROUP)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSMinimumSystemVersion</key>
