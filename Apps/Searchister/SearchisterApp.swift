@@ -289,6 +289,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Closing the window quits, rather than leaving a windowless app in the Dock.
+    ///
+    /// Nothing here needs the process alive once the window is gone. The periodic sync above
+    /// only matters while someone is looking, and queued uploads are on a background
+    /// `URLSession` that outlives the app — the system relaunches it through
+    /// `handleEventsForBackgroundURLSession` when they finish.
+    ///
+    /// This does not disturb the Spotlight launch path below, which orders windows out rather
+    /// than closing them: AppKit calls this on a close, and `orderOut` is not one.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
     func application(
         _ application: NSApplication,
         handleEventsForBackgroundURLSession identifier: String,
