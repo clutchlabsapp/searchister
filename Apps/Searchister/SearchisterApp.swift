@@ -144,13 +144,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: { completionHandler() })
+            uploader.adoptBackgroundEvents(completionHandler: {
+                completionHandler()
+                // Its events have been delivered, so stop holding it. Nothing else drops these:
+                // the array is the only strong reference, and appending without ever removing
+                // grows it for every background-session relaunch the app sees.
+                Task { @MainActor in AppDelegate.retainedUploaders.removeAll { $0 === uploader } }
+            })
             AppDelegate.retainedUploaders.append(uploader)
         }
     }
 
     /// The system holds no strong reference to a session's delegate for us, and releasing it
-    /// before its events arrive loses them.
+    /// before its events arrive loses them. Each entry is removed once its events have been
+    /// delivered.
     @MainActor private static var retainedUploaders: [OutboxUploader] = []
 
     private func registerBackgroundTask() {
@@ -270,6 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.unhide(nil)
     }
 
+    /// Same reason as iOS: nothing else keeps a background session's delegate alive. Each entry
+    /// is removed once its events have been delivered.
     private var uploaders: [OutboxUploader] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -278,6 +287,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { _ in
             Task { @MainActor in try? await AppServices.shared.refresh(scope: .newDocuments) }
         }
+    }
+
+    /// Closing the window quits, rather than leaving a windowless app in the Dock.
+    ///
+    /// Nothing here needs the process alive once the window is gone. The periodic sync above
+    /// only matters while someone is looking, and queued uploads are on a background
+    /// `URLSession` that outlives the app — the system relaunches it through
+    /// `handleEventsForBackgroundURLSession` when they finish.
+    ///
+    /// This does not disturb the Spotlight launch path below, which orders windows out rather
+    /// than closing them: AppKit calls this on a close, and `orderOut` is not one.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 
     func application(
@@ -294,7 +316,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             let uploader = OutboxUploader(outbox: outbox, role: role)
-            uploader.adoptBackgroundEvents(completionHandler: { completionHandler() })
+            uploader.adoptBackgroundEvents(completionHandler: { [weak self] in
+                completionHandler()
+                Task { @MainActor in self?.uploaders.removeAll { $0 === uploader } }
+            })
             self.uploaders.append(uploader)
         }
     }

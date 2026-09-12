@@ -33,7 +33,7 @@
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.corespotlight.index</string>
+		<string>com.apple.spotlight.index</string>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).IndexRequestHandler</string>
 	</dict>

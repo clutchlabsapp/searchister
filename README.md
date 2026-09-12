@@ -258,7 +258,7 @@ into — after an OS index rebuild, a device migration, or a restore from backup
 marked, the app republishes nothing, and the entire index quietly stops appearing in Spotlight
 until someone thinks to rebuild the cache by hand.
 
-Registering an extension at `com.apple.corespotlight.index` is the only way to be told it
+Registering an extension at `com.apple.spotlight.index` is the only way to be told it
 happened. The system launches it with no app running and asks for either everything
 (`reindexAll()`) or specific identifiers (`reindex(identifiers:)`); both are served entirely from
 the shared database, so the extension needs neither the network nor the Keychain — its

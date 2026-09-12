@@ -57,6 +57,7 @@ struct RootView: View {
 #if os(macOS)
 private struct SidebarView: View {
     @Environment(SearchModel.self) private var model
+    @State private var isAddingLink = false
 
     var body: some View {
         SearchListView()
@@ -69,6 +70,19 @@ private struct SidebarView: View {
                     }
                     .help("Check for new documents")
                 }
+                // Declared last so it is the item nearest the search field, which `.searchable`
+                // puts at the trailing end of this column's toolbar.
+                ToolbarItem {
+                    Button {
+                        isAddingLink = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .help("Add a link")
+                }
+            }
+            .sheet(isPresented: $isAddingLink) {
+                AddLinkDialog()
             }
     }
 }
