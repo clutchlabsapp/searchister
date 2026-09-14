@@ -341,3 +341,24 @@ HisterKit/Tests/               swift test --package-path HisterKit
 Apps/Searchister/              SwiftUI app and App Intents
 Apps/ShareExtension/           share sheet target
 ```
+
+## Licence
+
+Searchister is licensed under the [GNU Affero General Public License, version 3](LICENSE).
+
+    Copyright (C) 2026 Clutch Labs
+
+AGPL §13 is what separates this from the plain GPL: modify Searchister, let other people use the
+modified version over a network, and you owe them its source. Searchister is a client rather than
+a server, so in practice that clause rarely bites — but Hister is AGPL, and keeping both halves of
+the project on the same terms is the point.
+
+Hister itself is a separate project by Adam Tauber, licensed independently. Searchister speaks to
+it over HTTP rather than linking it, so this repository is not a derivative work of Hister and was
+never obliged to match its licence; doing so is a choice.
+
+[GRDB.swift](https://github.com/groue/GRDB.swift), the only dependency, is MIT, which imposes
+nothing this licence does not already satisfy.
+
+If you intend to redistribute a build — through the App Store or anywhere else — read the
+licensing note in `AppStore/README.md` first.

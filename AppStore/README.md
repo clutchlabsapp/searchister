@@ -45,9 +45,18 @@ will drift — worth converting to whatever include mechanism the site uses, if 
 
 ## Loose ends outside this folder
 
-- **There is no LICENSE file in the repository.** Worth settling before the repo is public. Hister
-  is AGPL, but Searchister talks to it over HTTP rather than linking it, so it is not a derivative
-  work and the choice is genuinely yours.
+- **The repository is AGPL-3.0** (`LICENSE` at the root). Searchister is not a derivative work of
+  Hister — it speaks HTTP rather than linking it — so this was a choice rather than an obligation.
+
+  **The choice needs one more decision before the app ships.** Apple's terms restrict what someone
+  who downloads an app may do with it: a limited number of devices, tied to their Apple Account.
+  AGPLv3 §10 forbids imposing further restrictions on the rights the licence grants, and §7 is the
+  only door out. This is the conflict that got VLC pulled from the App Store in 2011. It is not
+  fatal here, because you hold the copyright and cannot infringe your own licence — but it does
+  mean nobody *else* could ship this build, and a reviewer or a user reading `LICENSE` has no way
+  to know that. The conventional fix is an additional permission under §7, a short App Store
+  exception recorded in the README and in the covering notice, said out loud rather than left
+  implicit. Ask and I will draft one.
 - **`ITSAppUsesNonExemptEncryption` is not in `Config/Searchister-Info.plist`.** Adding it stops
   App Store Connect asking on every single upload. See `listing.md`.
 - **Version is 0.1.0** with `CURRENT_PROJECT_VERSION = 1`. Both need bumping per upload; the build

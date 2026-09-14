@@ -84,6 +84,6 @@ purchase, unlocking nothing in the app) or to remove it for the first submission
 - [ ] Privacy nutrition labels filled in (see `privacy.md`)
 - [ ] Screenshots for iPhone, iPad **and** Mac — all three are required
 - [ ] `ITSAppUsesNonExemptEncryption` set, so upload does not stall on the question
-- [ ] A LICENSE file in the repository, if it is going to be public — there is not one today
+- [x] A LICENSE file in the repository — AGPL-3.0; see the licensing note in `README.md`
 - [ ] `DEVELOPMENT_TEAM` set in `Config/Local.xcconfig`, App Group and Keychain group registered
 - [ ] Archive validates for both platforms
